@@ -81,14 +81,16 @@ def is_permanent_failure(failure_reason: Optional[str]) -> bool:
 def unwrap_event(body: dict) -> dict:
     """Return the event object, with or without the ``data`` envelope.
 
-    Telnyx's own webhook documentation is inconsistent: the fax.queued example
-    is wrapped in ``{"data": ..., "meta": ...}`` while the fax.delivered and
-    fax.failed examples put ``event_type`` at the top level. Accept both.
+    Every fax webhook schema in Telnyx's published OpenAPI description wraps
+    the event in ``{"data": ..., "meta": ...}``, so that is the format to
+    expect. Their HTML documentation renders the fax.delivered and fax.failed
+    examples without the wrapper, which looks like a rendering fault rather
+    than a second real shape.
 
-    This is not defensive padding. If the unwrapped form is real and we only
-    accept the wrapped one, every delivered and failed callback raises, returns
-    5xx, and Telnyx redelivers that same payload indefinitely -- on every
-    successful fax.
+    Tolerating both is cheap insurance against being wrong about that: if the
+    unwrapped form ever does arrive and we only accept the wrapped one, the
+    callback raises, returns 5xx, and Telnyx redelivers that same payload
+    indefinitely -- on every successful fax, not just on malformed input.
     """
     event = body.get("data")
     if isinstance(event, dict):

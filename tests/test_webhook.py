@@ -8,6 +8,7 @@ reacts to. A 5xx makes it redeliver the same payload indefinitely.
 """
 
 import json
+import pathlib
 from datetime import timedelta
 
 from django.core import mail
@@ -61,30 +62,48 @@ def fax_message(faxable_publicbody):
     return message
 
 
+SPEC_FIXTURES = pathlib.Path(__file__).parent / "fixtures" / "telnyx"
+
+
+def spec_example(name):
+    """One of Telnyx's published OpenAPI examples, verbatim.
+
+    See tests/fixtures/telnyx/README.md. These are authoritative where the HTML
+    documentation is not.
+    """
+    return json.loads((SPEC_FIXTURES / name).read_text())
+
+
 def fax_event(status, fax_id=FAX_ID, **payload_overrides):
-    """A Telnyx fax webhook body, in the documented data/meta envelope."""
+    """A Telnyx fax webhook body.
+
+    Field set follows the OpenAPI schemas rather than the docs page: the
+    envelope is always data/meta, and ``client_state`` is echoed back from the
+    send. test_builder_matches_the_spec_shape keeps this honest.
+    """
     payload = {
-        "call_duration_secs": 79,
-        "connection_id": "1232154810234",
+        "call_duration_secs": 25,
+        "client_state": "aGF2ZSBhIG5pY2UgZGF5ID1d",
+        "connection_id": "234423",
         "direction": "outbound",
         "fax_id": fax_id,
-        "from": "+19459457421",
-        "original_media_url": "https://example.org/dummy.pdf",
-        "page_count": 1,
+        "from": "+17733372107",
+        "original_media_url": "http://www.example.com/fax.pdf",
+        "page_count": 2,
         "status": status,
-        "to": "+13129457420",
-        "user_id": "bdaa1f9f-1018-4156-867d-6c4ac9f556eb",
+        "to": "+15107882622",
+        "user_id": "19a75cea-02c6-4b9a-84fa-c9bc8341feb8",
     }
     payload.update(payload_overrides)
     return {
         "data": {
             "event_type": "fax.%s" % status,
-            "id": "3320554f-6b74-4138-a74b-a1e2ec7eaf8b",
-            "occurred_at": "2022-01-07T10:01:43.677850Z",
+            "id": "95479a2e-b947-470a-a88f-2da6dd07ae0f",
+            "occurred_at": "2020-05-05T13:08:22.039204Z",
             "record_type": "event",
             "payload": payload,
         },
-        "meta": {"attempt": 1, "delivered_to": "https://example.org/webhooks"},
+        "meta": {"attempt": 1, "delivered_to": "https://www.example.com/webhooks"},
     }
 
 
@@ -270,10 +289,13 @@ class TestStaleCallbacks:
 
 
 class TestEnvelope:
-    """Telnyx's docs show both a wrapped and an unwrapped envelope.
+    """The unwrapped envelope is defence, not an observed format.
 
-    Accepting only one of them means every callback in the other shape 5xxs,
-    and Telnyx redelivers it forever.
+    Every fax webhook schema in Telnyx's OpenAPI description wraps the event in
+    data/meta. The HTML docs page renders fax.delivered and fax.failed without
+    the wrapper, which looks like a rendering fault rather than a second real
+    shape -- but accepting only one shape means every callback in the other one
+    5xxs and is redelivered forever, so tolerating both stays worthwhile.
     """
 
     def test_unwrapped_delivered_is_accepted(
@@ -439,3 +461,82 @@ class TestRedeliveryVisibility:
         post_callback(client, signing_key, fax_event("delivered"))
 
         assert "redelivery attempt" not in caplog.text
+
+
+class TestSpecExamples:
+    """Drive the published OpenAPI examples through the view unmodified.
+
+    Only fax_id is rewritten, to point at our own message.
+    """
+
+    @pytest.mark.parametrize(
+        "filename,expected",
+        [
+            ("fax_queued.json", Delivery.STATUS_SENDING),
+            ("fax_media_processed.json", Delivery.STATUS_SENDING),
+            ("fax_sending_started.json", Delivery.STATUS_SENDING),
+            ("fax_delivered.json", Delivery.STATUS_SENT),
+        ],
+    )
+    def test_example_is_handled(
+        self, client, signing_key, fax_message, filename, expected
+    ):
+        body = spec_example(filename)
+        body["data"]["payload"]["fax_id"] = FAX_ID
+
+        response = post_callback(client, signing_key, body)
+
+        assert response.status_code == 200
+        fax_message.refresh_from_db()
+        assert fax_message.deliverystatus.status == expected
+
+    def test_failed_example_is_handled(
+        self, client, signing_key, fax_message, monkeypatch
+    ):
+        monkeypatch.setattr(
+            "froide_fax.tasks.retry_fax_delivery.apply_async",
+            lambda *a, **kw: None,
+        )
+        body = spec_example("fax_failed.json")
+        body["data"]["payload"]["fax_id"] = FAX_ID
+
+        response = post_callback(client, signing_key, body)
+
+        assert response.status_code == 200
+        fax_message.refresh_from_db()
+        assert fax_message.deliverystatus.status == Delivery.STATUS_FAILED
+        log = json.loads(fax_message.deliverystatus.log)
+        # receiver_call_dropped is transient, so this one is retried.
+        assert log["failure_reason"] == "receiver_call_dropped"
+
+    @pytest.mark.parametrize(
+        "filename",
+        [
+            "fax_queued.json",
+            "fax_media_processed.json",
+            "fax_sending_started.json",
+            "fax_delivered.json",
+            "fax_failed.json",
+        ],
+    )
+    def test_every_example_is_wrapped(self, filename):
+        # If this ever fails, the unwrapped envelope is real after all.
+        assert sorted(spec_example(filename)) == ["data", "meta"]
+
+    def test_builder_matches_the_spec_shape(self):
+        """fax_event() must not drift from the published schema."""
+        example = spec_example("fax_delivered.json")
+        built = fax_event("delivered")
+
+        assert sorted(built) == sorted(example)
+        assert sorted(built["data"]) == sorted(example["data"])
+        assert sorted(built["meta"]) == sorted(example["meta"])
+        assert sorted(built["data"]["payload"]) == sorted(
+            example["data"]["payload"]
+        )
+
+    def test_failed_example_carries_an_internal_reason(self):
+        """Telnyx sends a second, finer-grained reason we currently discard."""
+        payload = spec_example("fax_failed.json")["data"]["payload"]
+
+        assert payload["internal_failure_reason"] == "fs_fax_call_dropped"
