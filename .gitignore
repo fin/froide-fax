@@ -1,5 +1,13 @@
 *.egg-info
 *.pyc
 *.mo
+__pycache__/
 build/
+dist/
 .vscode/
+.venv/
+.pytest_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
