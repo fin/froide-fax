@@ -3,7 +3,7 @@ import re
 from datetime import datetime, timedelta
 from datetime import timezone as tz
 from functools import partial
-from typing import List
+from typing import List, Optional
 
 import phonenumbers
 from django.conf import settings
@@ -18,24 +18,83 @@ from froide.foirequest.models.message import MessageKind
 from .models import Signature
 
 
-def ensure_fax_number(publicbody):
-    if not publicbody.fax:
+def get_fax_region() -> str:
+    """Default region for parsing national-format fax numbers.
+
+    Was hardcoded to "DE", which silently rejects national-format numbers in
+    every other jurisdiction running froide. Falls back to LANGUAGE_CODE, the
+    same source froide.publicbody.validators.validate_fax uses.
+    """
+    region = getattr(settings, "FAX_NUMBER_REGION", None)
+    if region:
+        return region
+    return settings.LANGUAGE_CODE.upper().split("-")[0]
+
+
+def parse_fax_number(number: str, region: str = None) -> Optional[str]:
+    """Return `number` in E164, or None if it is not a usable fax number.
+
+    Pure: no database writes, no side effects.
+    """
+    if not number:
         return None
+    if region is None:
+        region = get_fax_region()
     try:
-        number = phonenumbers.parse(publicbody.fax, "DE")
+        parsed = phonenumbers.parse(number, region)
     except phonenumbers.phonenumberutil.NumberParseException:
         return None
-    if not phonenumbers.is_possible_number(number):
+    if not phonenumbers.is_possible_number(parsed):
+        return None
+    if not phonenumbers.is_valid_number(parsed):
+        return None
+    return phonenumbers.format_number(parsed, phonenumbers.PhoneNumberFormat.E164)
+
+
+def normalize_publicbody_fax(publicbody) -> Optional[str]:
+    """Rewrite publicbody.fax to E164 in place, clearing impossible numbers.
+
+    Split out of ensure_fax_number so callers can opt out of writing to a row
+    they do not own -- see ensure_fax_number(normalize=...).
+    """
+    if not publicbody.fax:
+        return None
+
+    try:
+        parsed = phonenumbers.parse(publicbody.fax, get_fax_region())
+    except phonenumbers.phonenumberutil.NumberParseException:
+        return None
+
+    if not phonenumbers.is_possible_number(parsed):
+        # Not merely invalid: cannot be a phone number at all. Drop it so it
+        # stops being offered as a fax destination.
         publicbody.fax = ""
-        publicbody.save()
+        publicbody.save(update_fields=["fax"])
         return None
-    if not phonenumbers.is_valid_number(number):
+
+    if not phonenumbers.is_valid_number(parsed):
         return None
-    fax_number = phonenumbers.format_number(number, phonenumbers.PhoneNumberFormat.E164)
+
+    fax_number = phonenumbers.format_number(parsed, phonenumbers.PhoneNumberFormat.E164)
     if fax_number != publicbody.fax:
         publicbody.fax = fax_number
-        publicbody.save()
+        publicbody.save(update_fields=["fax"])
     return fax_number
+
+
+def ensure_fax_number(publicbody, normalize: bool = True) -> Optional[str]:
+    """Return the public body's fax number in E164, or None.
+
+    With normalize=True (the default, and the historical behaviour) the number
+    is written back to the PublicBody row. Pass normalize=False from read-only
+    paths -- notably anything running inside request creation, where writing to
+    a PublicBody the requester does not own is a surprising side effect.
+    """
+    if publicbody is None:
+        return None
+    if normalize:
+        return normalize_publicbody_fax(publicbody)
+    return parse_fax_number(publicbody.fax)
 
 
 def get_signature(user):
