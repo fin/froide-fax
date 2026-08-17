@@ -14,7 +14,9 @@ from .utils import create_fax_message
 logger = logging.getLogger(__name__)
 
 # Telnyx callbacks normally land within seconds. Anything still SENDING after
-# this long suggests the webhook never arrived.
+# this long suggests the webhook never arrived. Independent of how often the
+# sweep runs: this defines "stuck", the beat interval decides how quickly a
+# stuck fax is noticed.
 STALE_AFTER = timedelta(minutes=30)
 SWEEP_LIMIT = 200
 
@@ -91,7 +93,8 @@ def sweep_pending_faxes(stale_minutes=None, limit=SWEEP_LIMIT):
     payload we rejected). Without it a fax that replaces an email can leave the
     requester with no confirmation at all and no sign anything went wrong.
 
-    Schedule from CELERY_BEAT_SCHEDULE, e.g. every 15 minutes.
+    Schedule from CELERY_BEAT_SCHEDULE, e.g. every four hours. This is a
+    backstop for a broken webhook, not a substitute for one.
     """
     if stale_minutes is None:
         stale = STALE_AFTER

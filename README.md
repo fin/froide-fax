@@ -34,7 +34,7 @@ backstop sweep to catch that:
 CELERY_BEAT_SCHEDULE = {
     "sweep-pending-faxes": {
         "task": "froide_fax.tasks.sweep_pending_faxes",
-        "schedule": crontab(minute="*/15"),
+        "schedule": crontab(minute=0, hour="*/4"),
     },
 }
 ```
@@ -42,3 +42,10 @@ CELERY_BEAT_SCHEDULE = {
 It re-checks any fax still `SENDING` after 30 minutes via
 `GET /v2/faxes/{id}` and applies the result through the same code path as the
 webhook.
+
+The two intervals do different jobs. The 30-minute threshold defines *stuck* --
+healthy callbacks land within seconds, so anything older has almost certainly
+been lost. The sweep interval bounds how long a lost callback goes unnoticed.
+Four-hourly is deliberate: this is a backstop for a broken webhook, not a
+substitute for one, and polling more often mostly re-asks about faxes that are
+simply slow. Pass `stale_minutes` to the task to override the threshold.
