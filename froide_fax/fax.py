@@ -114,6 +114,29 @@ def send_fax_telnyx(
     return response
 
 
+def get_fax_telnyx(fax_id, authorization=""):
+    """Fetch one fax's current state.
+
+    Telnyx's list endpoint cannot filter by status, so the sweep drives from
+    our own DeliveryStatus rows and looks each fax up by id.
+    """
+    response = requests.get(
+        "https://api.telnyx.com/v2/faxes/%s" % fax_id,
+        headers={"Authorization": authorization},
+        timeout=30,
+    )
+    if response.status_code == 404:
+        return None
+    response.raise_for_status()
+    return response.json().get("data")
+
+
+def get_fax(fax_id):
+    return get_fax_telnyx(
+        fax_id, authorization=f"Bearer {settings.TELNYX_API_KEY}"
+    )
+
+
 def send_fax(fax_number, media_url):
     return send_fax_telnyx(
         to=fax_number,
