@@ -11,3 +11,7 @@ dist/
 .coverage
 coverage.xml
 htmlcov/
+
+# Recorded from a real Telnyx callback; contains account metadata.
+# See README_LIVE_TESTS.md. Commit deliberately with `git add -f` if wanted.
+tests/fixtures/telnyx/captured_callback.json

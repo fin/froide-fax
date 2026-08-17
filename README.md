@@ -49,3 +49,18 @@ been lost. The sweep interval bounds how long a lost callback goes unnoticed.
 Four-hourly is deliberate: this is a backstop for a broken webhook, not a
 substitute for one, and polling more often mostly re-asks about faxes that are
 simply slow. Pass `stale_minutes` to the task to override the threshold.
+
+## Testing
+
+The test suite runs offline:
+
+```
+DJANGO_SETTINGS_MODULE=tests.settings DJANGO_CONFIGURATION=Test pytest tests/
+```
+
+Webhook payload fixtures are taken from Telnyx's published OpenAPI
+description; see `tests/fixtures/telnyx/README.md`.
+
+One thing cannot be covered offline: whether our webhook signature
+verification interoperates with Telnyx's signing. `README_LIVE_TESTS.md`
+describes how to record a real callback and switch those tests on.

@@ -7,6 +7,8 @@ above all, the response codes, because the status code is the only thing Telnyx
 reacts to. A 5xx makes it redeliver the same payload indefinitely.
 """
 
+import base64
+import datetime
 import json
 import pathlib
 from datetime import timedelta
@@ -16,6 +18,7 @@ from django.urls import reverse
 from django.utils import timezone
 
 import pytest
+import time_machine
 from nacl.encoding import Base64Encoder
 from nacl.signing import SigningKey
 
@@ -540,3 +543,69 @@ class TestSpecExamples:
         payload = spec_example("fax_failed.json")["data"]["payload"]
 
         assert payload["internal_failure_reason"] == "fs_fax_call_dropped"
+
+
+CAPTURED_CALLBACK = SPEC_FIXTURES / "captured_callback.json"
+
+
+@pytest.mark.skipif(
+    not CAPTURED_CALLBACK.exists(),
+    reason="no captured callback recorded; see README_LIVE_TESTS.md",
+)
+class TestCapturedSignature:
+    """Verify against a signature Telnyx actually produced.
+
+    Every other signature test in this file signs with a key it generated
+    itself, so it proves our verification is self-consistent -- nacl agreeing
+    with nacl -- and nothing about interoperating with Telnyx. Only a real
+    captured callback closes that gap, and no public fixture can substitute:
+    a signature is meaningful only against the key that produced it.
+
+    Recording one is a manual step, documented in README_LIVE_TESTS.md. These
+    tests skip until it has been done.
+    """
+
+    @pytest.fixture
+    def capture(self, settings):
+        data = json.loads(CAPTURED_CALLBACK.read_text())
+        settings.TELNYX_PUBLIC_KEY = data["public_key"]
+        data["body"] = base64.b64decode(data["body_base64"])
+        return data
+
+    @staticmethod
+    def _post(client, capture, body=None):
+        # The capture is older than the replay window, so move the clock back
+        # to when Telnyx signed it.
+        sent_at = datetime.datetime.fromtimestamp(
+            int(capture["timestamp"]), datetime.timezone.utc
+        )
+        with time_machine.travel(sent_at, tick=False):
+            return client.post(
+                reverse("froide_fax-status_callback"),
+                data=capture["body"] if body is None else body,
+                content_type="application/json",
+                headers={
+                    "telnyx-timestamp": capture["timestamp"],
+                    "telnyx-signature-ed25519": capture["signature"],
+                },
+            )
+
+    def test_real_signature_is_accepted(self, client, capture):
+        response = self._post(client, capture)
+
+        # 200 whether or not the fax id matches a message here; what matters is
+        # that verification did not reject it.
+        assert response.status_code != 403
+
+    def test_real_signature_rejects_a_tampered_body(self, client, capture):
+        tampered = capture["body"].replace(b"delivered", b"failed___")
+        if tampered == capture["body"]:
+            tampered = capture["body"] + b" "
+
+        response = self._post(client, capture, body=tampered)
+
+        assert response.status_code == 403
+
+    def test_capture_is_wrapped(self, capture):
+        """What the envelope actually looked like on the wire."""
+        assert sorted(json.loads(capture["body"])) == ["data", "meta"]
