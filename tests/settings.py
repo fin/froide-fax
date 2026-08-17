@@ -8,6 +8,9 @@ class Test(FroideTest):
         FroideTest.INSTALLED_APPS.default + ["froide_fax"]
     )
 
+    # froide's urlconf does not mount this package; tests/urls.py does.
+    ROOT_URLCONF = "tests.urls"
+
     TELNYX_API_KEY = "test-api-key"
     TELNYX_APP_ID = "test-app-id"
     TELNYX_FROM_NUMBER = "+4930000000"

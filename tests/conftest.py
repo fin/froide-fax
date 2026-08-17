@@ -45,3 +45,22 @@ def email_message(faxable_request, faxable_publicbody):
         # freshness check in message_can_be_faxed() always rejects.
         timestamp=timezone.now(),
     )
+
+
+@pytest.fixture(autouse=True)
+def no_telnyx_network(monkeypatch):
+    """Never let a test reach api.telnyx.com.
+
+    CELERY_TASK_ALWAYS_EAGER is on, so a scheduled retry runs inside the
+    request that scheduled it and calls out to Telnyx for real. Tests that
+    want the failure path have to stub the retry themselves; this makes
+    forgetting loud instead of silently slow and network-dependent.
+    """
+
+    def blocked(*args, **kwargs):
+        raise AssertionError(
+            "test attempted a live Telnyx API call -- stub it explicitly"
+        )
+
+    monkeypatch.setattr("froide_fax.fax.send_fax_telnyx", blocked)
+    monkeypatch.setattr("froide_fax.fax.get_fax_telnyx", blocked)
