@@ -70,6 +70,16 @@ def fax_media_url(request, signed):
     )
 
 
+# Telnyx documents a five-minute tolerance on the signature timestamp. Without
+# it a validly signed payload stays replayable for as long as the signing key
+# lives.
+WEBHOOK_TOLERANCE_SECONDS = 5 * 60
+
+
+def _forbidden(reason):
+    return HttpResponseForbidden(reason, content_type="text/plain")
+
+
 @csrf_exempt
 @require_POST
 def fax_status_callback(request: HttpRequest):
@@ -78,16 +88,35 @@ def fax_status_callback(request: HttpRequest):
     event_signature = request.headers.get("Telnyx-Signature-Ed25519")
     public_key = settings.TELNYX_PUBLIC_KEY
 
+    # Absent or unparsable headers are a rejected request, not a server error.
+    # This endpoint is public and csrf-exempt, so anyone can post to it.
+    if not event_timestamp or not event_signature:
+        return _forbidden("missing signature headers")
+
+    try:
+        signature = Base64Encoder.decode(event_signature)
+    except Exception:
+        return _forbidden("malformed signature")
+
+    try:
+        sent_at = datetime.datetime.fromtimestamp(
+            int(event_timestamp), pytz.timezone("UTC")
+        )
+    except (TypeError, ValueError, OSError, OverflowError):
+        return _forbidden("malformed timestamp")
+
     # prepare signature data for nacl
     verify_key = VerifyKey(public_key, encoder=Base64Encoder)
     callback_bytes = f"{event_timestamp}|".encode("UTF-8") + request.body
-    signature = Base64Encoder.decode(event_signature)
 
     # verify signature
     try:
         verify_key.verify(callback_bytes, signature=signature)
     except BadSignatureError:
-        return HttpResponseForbidden("invalid signature", content_type="text/plain")
+        return _forbidden("invalid signature")
+
+    if abs((timezone.now() - sent_at).total_seconds()) > WEBHOOK_TOLERANCE_SECONDS:
+        return _forbidden("stale timestamp")
 
     payload_json = json.loads(request.body)
     data = unwrap_event(payload_json)
@@ -126,12 +155,22 @@ def fax_status_callback(request: HttpRequest):
 
     # only try and update if the timestamp in request is more recent than
     # the one in the database
-    dt = datetime.datetime.fromtimestamp(int(event_timestamp), pytz.timezone("UTC"))
     try:
-        if fax_message.deliverystatus.last_update > dt:
+        if fax_message.deliverystatus.last_update > sent_at:
             return HttpResponse(status=409)
     except DeliveryStatus.DoesNotExist:
         pass
+
+    # Telnyx counts its own redelivery attempts. Anything above 1 means an
+    # earlier attempt did not get a 2xx out of us.
+    attempt = payload_json.get("meta", {}).get("attempt")
+    if attempt and attempt > 1:
+        logger.warning(
+            "Telnyx redelivery attempt %s for fax %s (status %r)",
+            attempt,
+            fax_id,
+            raw_status,
+        )
 
     # Create machine-readable log
     fax_log_data = {
@@ -143,6 +182,7 @@ def fax_status_callback(request: HttpRequest):
         "duration": data["payload"].get("call_duration_secs", 0),
         "failure_reason": data["payload"].get("failure_reason"),
         "date_created": data["occurred_at"],
+        "webhook_attempt": attempt,
     }
 
     apply_fax_status(

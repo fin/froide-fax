@@ -249,7 +249,8 @@ class TestStaleCallbacks:
             client,
             signing_key,
             fax_event("delivered"),
-            timestamp=timezone.now() - timedelta(hours=1),
+            # Inside the replay window, so the 409 is what is under test.
+            timestamp=timezone.now() - timedelta(seconds=60),
         )
 
         assert response.status_code == 409
@@ -326,5 +327,115 @@ class TestEnvelope:
 
         post_callback(client, signing_key, unwrapped(fax_event("delivered")))
         fax_message.refresh_from_db()
+        unwrapped_log = json.loads(fax_message.deliverystatus.log)
 
-        assert json.loads(fax_message.deliverystatus.log) == wrapped_log
+        # meta.attempt only exists in the wrapped envelope; everything the fax
+        # itself reports must be identical.
+        assert unwrapped_log.pop("webhook_attempt") is None
+        assert wrapped_log.pop("webhook_attempt") == 1
+        assert unwrapped_log == wrapped_log
+
+
+class TestMalformedHeaders:
+    """This endpoint is public and csrf-exempt; bad input must not 5xx."""
+
+    def test_missing_both_headers(self, client, fax_message):
+        response = client.post(
+            reverse("froide_fax-status_callback"),
+            data=json.dumps(fax_event("delivered")),
+            content_type="application/json",
+        )
+        assert response.status_code == 403
+
+    def test_missing_timestamp(self, client, signing_key, fax_message):
+        response = client.post(
+            reverse("froide_fax-status_callback"),
+            data=json.dumps(fax_event("delivered")),
+            content_type="application/json",
+            headers={"telnyx-signature-ed25519": "irrelevant"},
+        )
+        assert response.status_code == 403
+
+    def test_signature_that_is_not_base64(self, client, signing_key, fax_message):
+        response = post_callback(
+            client, signing_key, fax_event("delivered"), signature="!!!not base64!!!"
+        )
+        assert response.status_code == 403
+
+    def test_timestamp_that_is_not_a_number(self, client, signing_key, fax_message):
+        body = json.dumps(fax_event("delivered")).encode()
+        response = client.post(
+            reverse("froide_fax-status_callback"),
+            data=body,
+            content_type="application/json",
+            headers={
+                "telnyx-timestamp": "not-a-timestamp",
+                "telnyx-signature-ed25519": "aaaa",
+            },
+        )
+        assert response.status_code == 403
+
+
+class TestReplayWindow:
+    def test_old_but_validly_signed_payload_is_refused(
+        self, client, signing_key, fax_message
+    ):
+        response = post_callback(
+            client,
+            signing_key,
+            fax_event("delivered"),
+            timestamp=timezone.now() - timedelta(hours=6),
+        )
+
+        assert response.status_code == 403
+        fax_message.refresh_from_db()
+        assert fax_message.deliverystatus.status == Delivery.STATUS_SENDING
+
+    def test_far_future_timestamp_is_refused(self, client, signing_key, fax_message):
+        response = post_callback(
+            client,
+            signing_key,
+            fax_event("delivered"),
+            timestamp=timezone.now() + timedelta(hours=6),
+        )
+
+        assert response.status_code == 403
+
+    def test_just_inside_the_window_is_accepted(
+        self, client, signing_key, fax_message
+    ):
+        response = post_callback(
+            client,
+            signing_key,
+            fax_event("delivered"),
+            timestamp=timezone.now() - timedelta(seconds=60),
+        )
+
+        assert response.status_code == 200
+
+
+class TestRedeliveryVisibility:
+    def test_attempt_is_recorded(self, client, signing_key, fax_message):
+        body = fax_event("delivered")
+        body["meta"]["attempt"] = 4
+
+        post_callback(client, signing_key, body)
+
+        fax_message.refresh_from_db()
+        log = json.loads(fax_message.deliverystatus.log)
+        assert log["webhook_attempt"] == 4
+
+    def test_redelivery_is_logged(self, client, signing_key, fax_message, caplog):
+        body = fax_event("delivered")
+        body["meta"]["attempt"] = 3
+
+        post_callback(client, signing_key, body)
+
+        assert "redelivery attempt 3" in caplog.text
+
+    def test_first_attempt_is_not_logged(
+        self, client, signing_key, fax_message, caplog
+    ):
+        post_callback(client, signing_key, fax_event("delivered"))
+
+        assert "redelivery attempt" not in caplog.text
