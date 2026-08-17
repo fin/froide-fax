@@ -12,10 +12,13 @@ from froide.foirequest.models.message import MessageKind
 from froide.helper.widgets import BootstrapCheckboxInput
 
 from .forms import SignatureField, save_signature_for_user
+from .models import FaxOverride
 from .pdf_generator import FaxMessagePDFGenerator
 from .utils import create_fax_message, ensure_fax_number, get_media_url, get_signature
 
 logger = logging.getLogger(__name__)
+
+FAX_ATTACHMENT_NAME = "fax.pdf"
 
 
 class FaxFailedException(Exception):
@@ -31,16 +34,33 @@ def convert_to_fax_bytes(original_message: FoiMessage) -> bytes:
     return pdf_generator.get_pdf_bytes()
 
 
+def get_fax_source_message(fax_message: FoiMessage) -> FoiMessage:
+    """The message whose content gets rendered onto the fax.
+
+    Normally a fax is a copy of an email message and `original` points at it.
+    When the fax *replaces* the email (FaxOverride) the message is the request
+    itself and has no original.
+    """
+    return fax_message.original or fax_message
+
+
+def get_fax_attachment(fax_message):
+    for att in fax_message.attachments:
+        if att.name == FAX_ATTACHMENT_NAME:
+            return att
+    return None
+
+
 def create_fax_attachment(fax_message):
     att = FoiAttachment(
         belongs_to=fax_message,
-        name="fax.pdf",
+        name=FAX_ATTACHMENT_NAME,
         is_redacted=False,
         filetype="application/pdf",
         approved=False,
         can_approve=False,
     )
-    pdf_bytes = convert_to_fax_bytes(fax_message.original)
+    pdf_bytes = convert_to_fax_bytes(get_fax_source_message(fax_message))
     pdf_file = ContentFile(pdf_bytes)
     att.size = pdf_file.size
     att.file.save(att.name, pdf_file)
@@ -105,14 +125,45 @@ def send_fax(fax_number, media_url):
 
 
 class FaxMessageHandler(MessageHandler):
+    @classmethod
+    def handle_request_outgoing_messages(cls, foirequest):
+        """Claim a request whose public body is marked fax-only.
+
+        Called by froide when it decides an outgoing message's kind. On a froide
+        without that mechanism this is simply never invoked and the package
+        behaves exactly as before.
+        """
+        return FaxOverride.objects.is_fax_recipient(
+            getattr(foirequest, "public_body", None)
+        )
+
+    def get_fax_number(self):
+        """Resolve the number for this message's actual recipient.
+
+        Prefers an explicit FaxOverride so a fax-only body is dialled on the
+        configured line, and falls back to the public body's own number for the
+        original mode. normalize=False: this can run inside request creation,
+        where writing to a PublicBody row would be a surprising side effect.
+        """
+        message = self.message
+        publicbody = message.recipient_public_body
+        override = FaxOverride.objects.get_for_publicbody(publicbody)
+        if override is not None:
+            return override.number
+        return ensure_fax_number(publicbody, normalize=False)
+
     def run_send(self, **kwargs):
         fax_message = self.message
 
-        fax_number = ensure_fax_number(fax_message.recipient_public_body)
+        fax_number = self.get_fax_number()
         if fax_number is None:
             return None
 
-        att = fax_message.attachments[0]
+        # When the fax replaces the email, nothing has rendered the document
+        # yet -- send_fax_message() only runs for the copy-of-an-email flow.
+        att = get_fax_attachment(fax_message)
+        if att is None:
+            att = create_fax_attachment(fax_message)
 
         media_url = get_media_url(att)
 

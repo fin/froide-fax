@@ -30,6 +30,7 @@ from froide.problem.models import ProblemReport
 
 from froide_fax.fax import convert_to_fax_bytes
 
+from .delivery import send_fax_sent_confirmation
 from .forms import SignatureForm
 from .models import FAX_PERMISSION
 from .pdf_generator import FaxReportPDFGenerator
@@ -158,6 +159,10 @@ def fax_status_callback(request: HttpRequest):
         ProblemReport.objects.find_and_resolve(
             message=fax_message, kind=ProblemReport.PROBLEM.BOUNCE_PUBLICBODY
         )
+        if fax_message.original_id is None:
+            # This fax replaced the email rather than accompanying one, so no
+            # confirmation has reached the requester yet.
+            send_fax_sent_confirmation(fax_message)
 
     failed = False
     if status == DeliveryStatus.Delivery.STATUS_FAILED:
