@@ -1,5 +1,6 @@
 import datetime
 import json
+import logging
 
 from django.conf import settings
 from django.contrib import messages
@@ -26,15 +27,13 @@ from nacl.signing import VerifyKey
 from froide.foirequest.auth import can_write_foirequest
 from froide.foirequest.models import DeliveryStatus, FoiAttachment, FoiMessage
 from froide.helper.utils import get_redirect_url
-from froide.problem.models import ProblemReport
 
 from froide_fax.fax import convert_to_fax_bytes
 
-from .delivery import send_fax_sent_confirmation
 from .forms import SignatureForm
 from .models import FAX_PERMISSION
 from .pdf_generator import FaxReportPDFGenerator
-from .tasks import retry_fax_delivery
+from .status import INBOUND_STATUSES, apply_fax_status, map_telnyx_status
 from .utils import (
     create_fax_log,
     create_fax_message,
@@ -43,6 +42,8 @@ from .utils import (
     message_can_get_fax_report,
     unsign_attachment_id,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def fax_media_url(request, signed):
@@ -98,45 +99,34 @@ def fax_status_callback(request: HttpRequest):
     if not fax_id:
         raise ValueError(f"This is not a valid API response body: {request.body}")
 
-    fax_message: FoiMessage = get_object_or_404(FoiMessage, email_message_id=fax_id)
+    raw_status = payload_json.get("data", {}).get("payload", {}).get("status")
+    if raw_status in INBOUND_STATUSES:
+        # Inbound faxes arrive on the same application webhook. We do not
+        # receive faxes; acknowledge so Telnyx stops redelivering.
+        return HttpResponse(status=200)
 
-    # find status
+    status = map_telnyx_status(raw_status)
+    if status is None:
+        # Well-formed but unrecognised. Returning 5xx here would make Telnyx
+        # redeliver the same payload indefinitely without ever succeeding.
+        logger.warning("Unhandled Telnyx fax status %r for fax %s", raw_status, fax_id)
+        return HttpResponse(status=200)
+
     try:
-        status = payload_json.get("data").get("payload").get("status")
-    except AttributeError as e:
-        # we should never end up here either
-        raise ValueError(
-            f"This is not a valid API response body: {request.body}"
-        ) from e
-
-    if status == "failed":
-        status = DeliveryStatus.Delivery.STATUS_FAILED
-    elif status == "queued":
-        status = DeliveryStatus.Delivery.STATUS_SENDING
-    elif status == "media.processed":
-        status = DeliveryStatus.Delivery.STATUS_SENDING
-    elif status.startswith("sending"):
-        status = DeliveryStatus.Delivery.STATUS_SENDING
-    elif status == "delivered":
-        status = DeliveryStatus.Delivery.STATUS_SENT
-    else:
-        # again: we should not end up here. according to telnyx-docu those
-        # are all possible stati
-        raise ValueError(f"This is not a valid status response: {status}")
+        fax_message: FoiMessage = FoiMessage.objects.get(email_message_id=fax_id)
+    except FoiMessage.DoesNotExist:
+        logger.warning("Telnyx callback for unknown fax id %s", fax_id)
+        return HttpResponse(status=200)
 
     # only try and update if the timestamp in request is more recent than
     # the one in the database
     dt = datetime.datetime.fromtimestamp(int(event_timestamp), pytz.timezone("UTC"))
-    if fax_message.deliverystatus.last_update > dt:
-        return HttpResponse(status=409)
+    try:
+        if fax_message.deliverystatus.last_update > dt:
+            return HttpResponse(status=409)
+    except DeliveryStatus.DoesNotExist:
+        pass
 
-    ds, _created = DeliveryStatus.objects.update_or_create(
-        message=fax_message,
-        defaults=dict(
-            status=status,
-            last_update=timezone.now(),
-        ),
-    )
     data = payload_json.get("data")
 
     # Create machine-readable log
@@ -144,46 +134,16 @@ def fax_status_callback(request: HttpRequest):
         "from_": data["payload"]["from"],
         "to": data["payload"]["to"],
         "sid": data["payload"]["fax_id"],
-        "status": data["payload"]["status"],
+        "status": raw_status,
         "num_pages": data["payload"].get("page_count", 0),
         "duration": data["payload"].get("call_duration_secs", 0),
         "failure_reason": data["payload"].get("failure_reason"),
         "date_created": data["occurred_at"],
     }
-    ds.log = create_fax_log(ds.log, fax_log_data)
-    ds.save()
 
-    if status == DeliveryStatus.Delivery.STATUS_SENT:
-        fax_message.timestamp = ds.last_update
-        fax_message.save()
-        ProblemReport.objects.find_and_resolve(
-            message=fax_message, kind=ProblemReport.PROBLEM.BOUNCE_PUBLICBODY
-        )
-        if fax_message.original_id is None:
-            # This fax replaced the email rather than accompanying one, so no
-            # confirmation has reached the requester yet.
-            send_fax_sent_confirmation(fax_message)
-
-    failed = False
-    if status == DeliveryStatus.Delivery.STATUS_FAILED:
-        if ds.retry_count >= 3:
-            failed = True
-        else:
-            # Retry fax delivery in 15 minutes
-            retry_fax_delivery.apply_async(
-                (fax_message.pk,),
-                {},
-                # resend in intervals of 0.25, 1, 2 and 4 hours
-                countdown=15 * 60 * 4**ds.retry_count,
-            )
-
-    if failed:
-        ProblemReport.objects.report(
-            message=fax_message,
-            kind=ProblemReport.PROBLEM.BOUNCE_PUBLICBODY,
-            description=ds.log,
-            auto_submitted=True,
-        )
+    apply_fax_status(
+        fax_message, status, log=create_fax_log(None, fax_log_data)
+    )
 
     return HttpResponse(status=200)
 
