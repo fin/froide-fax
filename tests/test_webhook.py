@@ -88,6 +88,14 @@ def fax_event(status, fax_id=FAX_ID, **payload_overrides):
     }
 
 
+def unwrapped(body):
+    """The same event with Telnyx's ``data``/``meta`` envelope stripped.
+
+    Telnyx documents fax.delivered and fax.failed in this shape.
+    """
+    return body["data"]
+
+
 def post_callback(client, signing_key, body, timestamp=None, signature=None):
     if not isinstance(body, bytes):
         body = json.dumps(body).encode()
@@ -258,3 +266,65 @@ class TestStaleCallbacks:
         assert response.status_code == 200
         fax_message.refresh_from_db()
         assert fax_message.deliverystatus.status == Delivery.STATUS_SENT
+
+
+class TestEnvelope:
+    """Telnyx's docs show both a wrapped and an unwrapped envelope.
+
+    Accepting only one of them means every callback in the other shape 5xxs,
+    and Telnyx redelivers it forever.
+    """
+
+    def test_unwrapped_delivered_is_accepted(
+        self, client, signing_key, fax_message
+    ):
+        response = post_callback(
+            client, signing_key, unwrapped(fax_event("delivered"))
+        )
+
+        assert response.status_code == 200
+        fax_message.refresh_from_db()
+        assert fax_message.deliverystatus.status == Delivery.STATUS_SENT
+
+    def test_unwrapped_failed_is_accepted(
+        self, client, signing_key, fax_message, monkeypatch
+    ):
+        monkeypatch.setattr(
+            "froide_fax.tasks.retry_fax_delivery.apply_async",
+            lambda *a, **kw: None,
+        )
+        response = post_callback(
+            client,
+            signing_key,
+            unwrapped(fax_event("failed", failure_reason="user_busy")),
+        )
+
+        assert response.status_code == 200
+        fax_message.refresh_from_db()
+        assert fax_message.deliverystatus.status == Delivery.STATUS_FAILED
+
+    def test_unwrapped_inbound_is_acknowledged(
+        self, client, signing_key, fax_message
+    ):
+        response = post_callback(
+            client, signing_key, unwrapped(fax_event("receiving"))
+        )
+
+        assert response.status_code == 200
+
+    def test_both_envelopes_log_identically(
+        self, client, signing_key, fax_message, faxable_publicbody
+    ):
+        post_callback(client, signing_key, fax_event("delivered"))
+        fax_message.refresh_from_db()
+        wrapped_log = json.loads(fax_message.deliverystatus.log)
+
+        ds = fax_message.deliverystatus
+        ds.status = Delivery.STATUS_SENDING
+        ds.last_update = timezone.now() - timedelta(hours=2)
+        ds.save()
+
+        post_callback(client, signing_key, unwrapped(fax_event("delivered")))
+        fax_message.refresh_from_db()
+
+        assert json.loads(fax_message.deliverystatus.log) == wrapped_log

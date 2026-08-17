@@ -40,6 +40,24 @@ MAX_RETRIES = 3
 RETRY_BASE_SECONDS = 15 * 60
 
 
+def unwrap_event(body: dict) -> dict:
+    """Return the event object, with or without the ``data`` envelope.
+
+    Telnyx's own webhook documentation is inconsistent: the fax.queued example
+    is wrapped in ``{"data": ..., "meta": ...}`` while the fax.delivered and
+    fax.failed examples put ``event_type`` at the top level. Accept both.
+
+    This is not defensive padding. If the unwrapped form is real and we only
+    accept the wrapped one, every delivered and failed callback raises, returns
+    5xx, and Telnyx redelivers that same payload indefinitely -- on every
+    successful fax.
+    """
+    event = body.get("data")
+    if isinstance(event, dict):
+        return event
+    return body
+
+
 def map_telnyx_status(raw_status: Optional[str]) -> Optional[str]:
     """Translate a Telnyx status into a froide DeliveryStatus, or None."""
     if not raw_status:

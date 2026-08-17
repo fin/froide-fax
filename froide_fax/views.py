@@ -33,7 +33,12 @@ from froide_fax.fax import convert_to_fax_bytes
 from .forms import SignatureForm
 from .models import FAX_PERMISSION
 from .pdf_generator import FaxReportPDFGenerator
-from .status import INBOUND_STATUSES, apply_fax_status, map_telnyx_status
+from .status import (
+    INBOUND_STATUSES,
+    apply_fax_status,
+    map_telnyx_status,
+    unwrap_event,
+)
 from .utils import (
     create_fax_log,
     create_fax_message,
@@ -85,11 +90,12 @@ def fax_status_callback(request: HttpRequest):
         return HttpResponseForbidden("invalid signature", content_type="text/plain")
 
     payload_json = json.loads(request.body)
+    data = unwrap_event(payload_json)
 
     # get message object
     fax_id = None
     try:
-        fax_id = payload_json.get("data").get("payload").get("fax_id")
+        fax_id = data.get("payload").get("fax_id")
     except AttributeError as e:
         # this key should always exist. we should never end up here
         raise ValueError(
@@ -99,7 +105,7 @@ def fax_status_callback(request: HttpRequest):
     if not fax_id:
         raise ValueError(f"This is not a valid API response body: {request.body}")
 
-    raw_status = payload_json.get("data", {}).get("payload", {}).get("status")
+    raw_status = data.get("payload", {}).get("status")
     if raw_status in INBOUND_STATUSES:
         # Inbound faxes arrive on the same application webhook. We do not
         # receive faxes; acknowledge so Telnyx stops redelivering.
@@ -126,8 +132,6 @@ def fax_status_callback(request: HttpRequest):
             return HttpResponse(status=409)
     except DeliveryStatus.DoesNotExist:
         pass
-
-    data = payload_json.get("data")
 
     # Create machine-readable log
     fax_log_data = {
