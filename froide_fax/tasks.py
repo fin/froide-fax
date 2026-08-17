@@ -156,5 +156,10 @@ def poll_fax_status(message_id):
         # reset the staleness clock and hide a genuinely stuck fax.
         return
 
-    apply_fax_status(message, status, log=json.dumps(fax_data, default=str))
+    apply_fax_status(
+        message,
+        status,
+        log=json.dumps(fax_data, default=str),
+        failure_reason=fax_data.get("failure_reason"),
+    )
     return status

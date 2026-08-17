@@ -36,8 +36,46 @@ TELNYX_STATUS_MAP = {
 # ignored rather than unknown.
 INBOUND_STATUSES = frozenset({"receiving", "received"})
 
+# Telnyx failure reasons that cannot succeed on a retry. Everything not listed
+# here keeps the old behaviour and is retried, so an unrecognised reason is
+# never made worse by this classification.
+#
+# The destination will never accept a fax:
+PERMANENT_DESTINATION_FAILURES = frozenset(
+    {
+        "destination_invalid",
+        "destination_not_in_countries_whitelist",
+        "destination_not_in_service_plan",
+        "receiver_incompatible_destination",
+        "receiver_invalid_number_format",
+        "receiver_unallocated_number",
+        "unverified_destination_not_allowed",
+    }
+)
+
+# Our own account or configuration is broken; no destination would work:
+PERMANENT_ACCOUNT_FAILURES = frozenset(
+    {
+        "account_disabled",
+        "no_outbound_profile",
+        "unverified_origination_number",
+    }
+)
+
+NON_RETRYABLE_FAILURES = PERMANENT_DESTINATION_FAILURES | PERMANENT_ACCOUNT_FAILURES
+
 MAX_RETRIES = 3
 RETRY_BASE_SECONDS = 15 * 60
+
+
+def is_permanent_failure(failure_reason: Optional[str]) -> bool:
+    """Whether retrying this failure is pointless.
+
+    Retries cost a page charge each and, at four attempts with exponential
+    backoff, delay the ProblemReport by more than five hours. For a number that
+    is unallocated or malformed, none of that buys anything.
+    """
+    return failure_reason in NON_RETRYABLE_FAILURES
 
 
 def unwrap_event(body: dict) -> dict:
@@ -75,6 +113,7 @@ def apply_fax_status(
     delivery_status: str,
     log: str = "",
     schedule_retry: bool = True,
+    failure_reason: Optional[str] = None,
 ) -> DeliveryStatus:
     """Record a resolved status and run the follow-on effects.
 
@@ -105,7 +144,7 @@ def apply_fax_status(
         return ds
 
     if delivery_status == Delivery.STATUS_FAILED:
-        if ds.retry_count >= MAX_RETRIES:
+        if is_permanent_failure(failure_reason) or ds.retry_count >= MAX_RETRIES:
             ProblemReport.objects.report(
                 message=fax_message,
                 kind=ProblemReport.PROBLEM.BOUNCE_PUBLICBODY,

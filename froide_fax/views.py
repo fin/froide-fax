@@ -146,7 +146,10 @@ def fax_status_callback(request: HttpRequest):
     }
 
     apply_fax_status(
-        fax_message, status, log=create_fax_log(None, fax_log_data)
+        fax_message,
+        status,
+        log=create_fax_log(None, fax_log_data),
+        failure_reason=fax_log_data["failure_reason"],
     )
 
     return HttpResponse(status=200)

@@ -15,6 +15,7 @@ from froide_fax.status import (
     INBOUND_STATUSES,
     TELNYX_STATUS_MAP,
     apply_fax_status,
+    is_permanent_failure,
     map_telnyx_status,
 )
 from froide_fax.tasks import poll_fax_status, sweep_pending_faxes
@@ -184,3 +185,102 @@ class TestPoll:
 
     def test_missing_message_is_survivable(self):
         assert poll_fax_status(0) is None
+
+
+class TestPermanentFailures:
+    """Some failure reasons cannot succeed on a retry.
+
+    Retrying costs a page charge per attempt and, with exponential backoff over
+    four attempts, delays the ProblemReport by more than five hours.
+    """
+
+    @pytest.mark.parametrize(
+        "reason",
+        [
+            "destination_invalid",
+            "receiver_unallocated_number",
+            "receiver_invalid_number_format",
+            "unverified_destination_not_allowed",
+            "account_disabled",
+            "no_outbound_profile",
+        ],
+    )
+    def test_permanent_reasons_report_immediately(
+        self, replacement_fax, monkeypatch, reason
+    ):
+        scheduled = []
+        monkeypatch.setattr(
+            "froide_fax.tasks.retry_fax_delivery.apply_async",
+            lambda *a, **kw: scheduled.append((a, kw)),
+        )
+        apply_fax_status(
+            replacement_fax,
+            Delivery.STATUS_FAILED,
+            log="dead number",
+            failure_reason=reason,
+        )
+
+        assert scheduled == []
+        assert ProblemReport.objects.filter(
+            message=replacement_fax, kind=ProblemReport.PROBLEM.BOUNCE_PUBLICBODY
+        ).exists()
+
+    @pytest.mark.parametrize(
+        "reason",
+        [
+            "user_busy",
+            "receiver_no_answer",
+            "receiver_call_dropped",
+            "service_unavailable",
+            "destination_unreachable",
+            "fax_initial_communication_timeout",
+        ],
+    )
+    def test_transient_reasons_still_retry(
+        self, replacement_fax, monkeypatch, reason
+    ):
+        scheduled = []
+        monkeypatch.setattr(
+            "froide_fax.tasks.retry_fax_delivery.apply_async",
+            lambda *a, **kw: scheduled.append((a, kw)),
+        )
+        apply_fax_status(
+            replacement_fax,
+            Delivery.STATUS_FAILED,
+            log="busy",
+            failure_reason=reason,
+        )
+
+        assert len(scheduled) == 1
+        assert not ProblemReport.objects.filter(message=replacement_fax).exists()
+
+    def test_unknown_reason_keeps_retrying(self, replacement_fax, monkeypatch):
+        # An unrecognised reason must not be made worse by this classification.
+        scheduled = []
+        monkeypatch.setattr(
+            "froide_fax.tasks.retry_fax_delivery.apply_async",
+            lambda *a, **kw: scheduled.append((a, kw)),
+        )
+        apply_fax_status(
+            replacement_fax,
+            Delivery.STATUS_FAILED,
+            log="?",
+            failure_reason="something_telnyx_added_last_week",
+        )
+
+        assert len(scheduled) == 1
+
+    def test_missing_reason_keeps_retrying(self, replacement_fax, monkeypatch):
+        scheduled = []
+        monkeypatch.setattr(
+            "froide_fax.tasks.retry_fax_delivery.apply_async",
+            lambda *a, **kw: scheduled.append((a, kw)),
+        )
+        apply_fax_status(replacement_fax, Delivery.STATUS_FAILED, log="?")
+
+        assert len(scheduled) == 1
+
+    def test_permanent_reason_is_classified(self):
+        assert is_permanent_failure("receiver_unallocated_number")
+        assert not is_permanent_failure("user_busy")
+        assert not is_permanent_failure(None)
