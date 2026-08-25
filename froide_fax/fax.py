@@ -2,7 +2,6 @@ import logging
 
 import requests
 from django import forms
-from django.conf import settings
 from django.core.files.base import ContentFile
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
@@ -11,6 +10,7 @@ from froide.foirequest.models import DeliveryStatus, FoiAttachment, FoiMessage
 from froide.foirequest.models.message import MessageKind
 from froide.helper.widgets import BootstrapCheckboxInput
 
+from .backends import FaxSendResult, get_fax_backend
 from .forms import SignatureField, save_signature_for_user
 from .models import FaxOverride
 from .pdf_generator import FaxMessagePDFGenerator
@@ -132,19 +132,19 @@ def get_fax_telnyx(fax_id, authorization=""):
 
 
 def get_fax(fax_id):
-    return get_fax_telnyx(
-        fax_id, authorization=f"Bearer {settings.TELNYX_API_KEY}"
-    )
+    """Current state of one fax, via the configured backend."""
+    return get_fax_backend().get_status(fax_id)
 
 
-def send_fax(fax_number, media_url):
-    return send_fax_telnyx(
-        to=fax_number,
-        from_=settings.TELNYX_FROM_NUMBER,
-        media_url=media_url,
-        connection_id=settings.TELNYX_APP_ID,
-        authorization=f"Bearer {settings.TELNYX_API_KEY}",
-    )
+def send_fax(fax_number, media_url) -> FaxSendResult:
+    """Hand one fax to the configured backend.
+
+    `settings.FAX_BACKEND` selects it; the default is the real Telnyx
+    transport, so behaviour is unchanged unless it is set. The console and
+    dummy backends exercise message creation, PDF rendering and attachment
+    storage without any network call.
+    """
+    return get_fax_backend().send(fax_number, media_url)
 
 
 class FaxMessageHandler(MessageHandler):
@@ -198,21 +198,16 @@ class FaxMessageHandler(MessageHandler):
             ),
         )
         try:
-            fax_response = send_fax(fax_number, media_url)
+            result = send_fax(fax_number, media_url)
         except FaxFailedException as e:
             ds.status = DeliveryStatus.Delivery.STATUS_FAILED
             ds.log = e.msg
             ds.save()
             return
 
-        fax_data = fax_response.json().get("data")
-        if fax_data:
-            fax_id = fax_data.get("id", "")
-
-        sent = fax_response.status_code == 202
         # store fax.sid in message 'email_message_id' (misnomer)
         FoiMessage.objects.filter(pk=fax_message.pk).update(
-            email_message_id=fax_id, sent=sent
+            email_message_id=result.fax_id, sent=result.accepted
         )
 
     @classmethod

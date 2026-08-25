@@ -68,8 +68,10 @@ def test_api_object_is_mapped_off_telnyx_key_names():
 
 def test_report_template_fields_are_all_present():
     """froide_fax/report.html reads these; a missing key renders as ''."""
-    for log in (fax_log_from_api(API_FAX),
-                fax_log_from_webhook(WEBHOOK_PAYLOAD, OCCURRED_AT)):
+    for log in (
+        fax_log_from_api(API_FAX),
+        fax_log_from_webhook(WEBHOOK_PAYLOAD, OCCURRED_AT),
+    ):
         for field in ("from_", "to", "num_pages", "duration", "date_created"):
             assert log.get(field) not in (None, ""), field
 
@@ -102,6 +104,8 @@ def test_webhook_attempt_is_recorded():
 
 def test_survives_the_json_round_trip():
     """create_fax_log is what actually lands in DeliveryStatus.log."""
-    for log in (fax_log_from_api(API_FAX),
-                fax_log_from_webhook(WEBHOOK_PAYLOAD, OCCURRED_AT)):
+    for log in (
+        fax_log_from_api(API_FAX),
+        fax_log_from_webhook(WEBHOOK_PAYLOAD, OCCURRED_AT),
+    ):
         assert json.loads(create_fax_log(None, log))["sid"] == "fax-1234"

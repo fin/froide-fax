@@ -299,8 +299,18 @@ FAX_LOG_FIELDS = (
 )
 
 
-def _fax_log(*, from_, to, sid, status, num_pages, duration, failure_reason,
-             date_created, **extra):
+def _fax_log(
+    *,
+    from_,
+    to,
+    sid,
+    status,
+    num_pages,
+    duration,
+    failure_reason,
+    date_created,
+    **extra,
+):
     """Assemble a log entry in the canonical shape.
 
     Every caller goes through here so that a status resolved by the webhook and
@@ -353,8 +363,18 @@ def fax_log_from_api(fax_data):
     sweep used to store the whole object, and dropping fields would trade one
     debugging problem for another.
     """
-    mapped = {"from", "id", "fax_id", "page_count", "call_duration_secs",
-              "created_at", "occurred_at", "to", "status", "failure_reason"}
+    mapped = {
+        "from",
+        "id",
+        "fax_id",
+        "page_count",
+        "call_duration_secs",
+        "created_at",
+        "occurred_at",
+        "to",
+        "status",
+        "failure_reason",
+    }
     return _fax_log(
         from_=fax_data.get("from"),
         to=fax_data.get("to"),

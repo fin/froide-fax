@@ -50,6 +50,42 @@ Four-hourly is deliberate: this is a backstop for a broken webhook, not a
 substitute for one, and polling more often mostly re-asks about faxes that are
 simply slow. Pass `stale_minutes` to the task to override the threshold.
 
+## Fax transport backends
+
+`FAX_BACKEND` names the transport, the way `EMAIL_BACKEND` does for mail. It
+defaults to the real one, so leaving it unset changes nothing:
+
+```python
+FAX_BACKEND = "froide_fax.backends.telnyx.TelnyxFaxBackend"   # default
+FAX_BACKEND = "froide_fax.backends.console.ConsoleFaxBackend" # print, do not send
+FAX_BACKEND = "froide_fax.backends.dummy.DummyFaxBackend"     # discard silently
+```
+
+The console and dummy backends exercise everything up to the wire -- the fax
+`FoiMessage`, the rendered `fax.pdf` attachment, delivery status -- without a
+Telnyx account or a network call. Useful for looking at the letter the
+recipient would get.
+
+Both record what they were asked to send, mirroring `django.core.mail.outbox`:
+
+```python
+from froide_fax.backends import outbox
+
+outbox[0].to         # "+493012345678"
+outbox[0].media_url  # signed URL of the rendered PDF
+outbox[0].fax_id
+```
+
+They also answer `get_status()` with `delivered`, so the polling sweep can
+resolve a message end to end. Without that a fax sent by a non-delivering
+backend would sit in `STATUS_SENDING` for ever, since no webhook is coming.
+They report no page count: nothing opened the PDF, and a fabricated number
+would show up on the fax report.
+
+Writing another backend means subclassing `BaseFaxBackend` and implementing
+`send(to, media_url) -> FaxSendResult` and `get_status(fax_id) -> dict | None`,
+where the dict is Telnyx-shaped.
+
 ## Testing
 
 The test suite runs offline:
