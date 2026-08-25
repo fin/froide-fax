@@ -284,6 +284,90 @@ def message_can_get_fax_report(message: FoiMessage) -> bool:
     )
 
 
+# The shape `parse_fax_log` returns and `froide_fax/report.html` renders. It is
+# Twilio's field naming, kept deliberately: logs written before the Telnyx
+# migration are still in the database and still have to render.
+FAX_LOG_FIELDS = (
+    "from_",
+    "to",
+    "sid",
+    "status",
+    "num_pages",
+    "duration",
+    "failure_reason",
+    "date_created",
+)
+
+
+def _fax_log(*, from_, to, sid, status, num_pages, duration, failure_reason,
+             date_created, **extra):
+    """Assemble a log entry in the canonical shape.
+
+    Every caller goes through here so that a status resolved by the webhook and
+    the same status resolved by the polling sweep produce the same fields. They
+    did not: the sweep stored Telnyx's REST object verbatim, whose keys are
+    `from`, `id`, `page_count` and `call_duration_secs`, so the report template
+    -- which reads `from_`, `sid`, `num_pages`, `duration` -- rendered those
+    cells empty. Django resolves a missing key to '', so the report simply came
+    out blank rather than erroring.
+    """
+    log = {
+        "from_": from_,
+        "to": to,
+        "sid": sid,
+        "status": status,
+        "num_pages": num_pages or 0,
+        "duration": duration or 0,
+        "failure_reason": failure_reason,
+        "date_created": date_created,
+    }
+    log.update(extra)
+    return log
+
+
+def fax_log_from_webhook(payload, occurred_at, attempt=None):
+    """Canonical log from a status callback body (`data.payload`)."""
+    return _fax_log(
+        from_=payload.get("from"),
+        to=payload.get("to"),
+        sid=payload.get("fax_id"),
+        status=payload.get("status"),
+        num_pages=payload.get("page_count"),
+        duration=payload.get("call_duration_secs"),
+        failure_reason=payload.get("failure_reason"),
+        date_created=occurred_at,
+        webhook_attempt=attempt,
+    )
+
+
+def fax_log_from_api(fax_data):
+    """Canonical log from a REST fax object (`GET /v2/faxes/{id}`).
+
+    The REST object and the webhook payload disagree on two names: the fax id
+    is `id` here and `fax_id` there, and the timestamp is `created_at` here and
+    `occurred_at` there. Both spellings are accepted, because a caller handing
+    this a webhook payload should get a correct entry rather than a silently
+    empty one.
+
+    Unmapped keys are carried through so nothing Telnyx sent is lost -- the
+    sweep used to store the whole object, and dropping fields would trade one
+    debugging problem for another.
+    """
+    mapped = {"from", "id", "fax_id", "page_count", "call_duration_secs",
+              "created_at", "occurred_at", "to", "status", "failure_reason"}
+    return _fax_log(
+        from_=fax_data.get("from"),
+        to=fax_data.get("to"),
+        sid=fax_data.get("id") or fax_data.get("fax_id"),
+        status=fax_data.get("status"),
+        num_pages=fax_data.get("page_count"),
+        duration=fax_data.get("call_duration_secs"),
+        failure_reason=fax_data.get("failure_reason"),
+        date_created=fax_data.get("created_at") or fax_data.get("occurred_at"),
+        **{k: v for k, v in fax_data.items() if k not in mapped},
+    )
+
+
 def create_fax_log(previous_log, data):
     return json.dumps(data, cls=DjangoJSONEncoder)
 

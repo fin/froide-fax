@@ -42,6 +42,7 @@ from .status import (
 from .utils import (
     create_fax_log,
     create_fax_message,
+    fax_log_from_webhook,
     message_can_be_faxed,
     message_can_be_resend,
     message_can_get_fax_report,
@@ -173,17 +174,9 @@ def fax_status_callback(request: HttpRequest):
         )
 
     # Create machine-readable log
-    fax_log_data = {
-        "from_": data["payload"]["from"],
-        "to": data["payload"]["to"],
-        "sid": data["payload"]["fax_id"],
-        "status": raw_status,
-        "num_pages": data["payload"].get("page_count", 0),
-        "duration": data["payload"].get("call_duration_secs", 0),
-        "failure_reason": data["payload"].get("failure_reason"),
-        "date_created": data["occurred_at"],
-        "webhook_attempt": attempt,
-    }
+    fax_log_data = fax_log_from_webhook(
+        data["payload"], data["occurred_at"], attempt=attempt
+    )
 
     apply_fax_status(
         fax_message,

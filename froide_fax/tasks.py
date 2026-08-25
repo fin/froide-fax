@@ -1,4 +1,3 @@
-import json
 import logging
 from datetime import timedelta
 
@@ -9,7 +8,7 @@ from froide.celery import app as celery_app
 from froide.foirequest.models import DeliveryStatus, FoiMessage
 from froide.foirequest.models.message import MessageKind
 
-from .utils import create_fax_message
+from .utils import create_fax_log, create_fax_message, fax_log_from_api
 
 logger = logging.getLogger(__name__)
 
@@ -159,7 +158,10 @@ def poll_fax_status(message_id):
     apply_fax_status(
         message,
         status,
-        log=json.dumps(fax_data, default=str),
+        # Normalised, not the raw REST object: see utils._fax_log. Storing it
+        # verbatim left the fax report blank for every fax resolved by the
+        # sweep rather than by a callback.
+        log=create_fax_log(None, fax_log_from_api(fax_data)),
         failure_reason=fax_data.get("failure_reason"),
     )
     return status
