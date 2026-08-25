@@ -22,11 +22,27 @@ class TestRegion:
         settings.LANGUAGE_CODE = "de"
         assert get_fax_region() == "DE"
 
-    def test_strips_language_subtag(self, settings):
+    def test_uses_the_region_subtag_not_the_language(self, settings):
+        """ "de-at" is German-as-written-in-Austria: the region is AT.
+
+        Reading it as DE parsed Austrian numbers in national format as German
+        and rejected them as unusable.
+        """
         settings.FAX_NUMBER_REGION = None
         settings.LANGUAGE_CODE = "de-at"
-        # "DE-AT" is not a region code; phonenumbers wants "DE".
-        assert get_fax_region() == "DE"
+        assert get_fax_region() == "AT"
+
+    def test_ignores_non_region_subtags(self, settings):
+        """Script subtags are not regions; do not invent one."""
+        settings.FAX_NUMBER_REGION = None
+        settings.LANGUAGE_CODE = "zh-hans"
+        assert get_fax_region() == "ZH"
+
+    def test_austrian_national_number_parses_under_de_at(self, settings):
+        """The bug as reported: rejected in the FaxOverride admin form."""
+        settings.FAX_NUMBER_REGION = None
+        settings.LANGUAGE_CODE = "de-at"
+        assert parse_fax_number("01 4000 81510") == "+431400081510"
 
 
 class TestParseFaxNumber:

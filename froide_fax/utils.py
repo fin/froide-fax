@@ -22,13 +22,27 @@ def get_fax_region() -> str:
     """Default region for parsing national-format fax numbers.
 
     Was hardcoded to "DE", which silently rejects national-format numbers in
-    every other jurisdiction running froide. Falls back to LANGUAGE_CODE, the
-    same source froide.publicbody.validators.validate_fax uses.
+    every other jurisdiction running froide. Falls back to LANGUAGE_CODE.
+
+    A language tag is language-first: the *region* is the second subtag, so
+    "de-at" means German as written in Austria and the region is AT. Taking the
+    first subtag instead yielded DE for every German-speaking site outside
+    Germany, and an Austrian number in national format ("01 4000 81510") was
+    then parsed as German, found invalid, and rejected -- with a message saying
+    the number was unusable rather than that it had been read as the wrong
+    country's.
+
+    Only a two-letter second subtag is treated as a region, so script tags such
+    as "zh-hans" do not turn into nonsense regions. Set FAX_NUMBER_REGION
+    explicitly to avoid relying on any of this.
     """
     region = getattr(settings, "FAX_NUMBER_REGION", None)
     if region:
         return region
-    return settings.LANGUAGE_CODE.upper().split("-")[0]
+    subtags = settings.LANGUAGE_CODE.split("-")
+    if len(subtags) > 1 and len(subtags[-1]) == 2:
+        return subtags[-1].upper()
+    return subtags[0].upper()
 
 
 def parse_fax_number(number: str, region: str = None) -> Optional[str]:
