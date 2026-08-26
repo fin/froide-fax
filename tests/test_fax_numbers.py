@@ -110,3 +110,51 @@ class TestEnsureFaxNumber:
 
     def test_handles_missing_publicbody(self):
         assert ensure_fax_number(None) is None
+
+
+class TestSignedMediaUrl:
+    """The fax PDF is handed to Telnyx over an unauthenticated URL.
+
+    The attachment itself is stored unapproved, and froide gates attachment
+    reads on `approved` -- but fax_media_url streams it with authorized=True so
+    Telnyx can fetch it without credentials. Signed with a plain Signer that
+    link never expired, so a URL handed to a third party, and recorded in their
+    access logs, stayed valid for the life of the signing key.
+    """
+
+    def test_media_signature_expires(self, settings):
+        from django.core.signing import TimestampSigner
+
+        from froide_fax.utils import FAX_MEDIA_SALT, sign_obj_id, unsign_attachment_id
+
+        signature = sign_obj_id(42, salt=FAX_MEDIA_SALT, expires=True)
+        assert unsign_attachment_id(signature) == 42
+
+        settings.FAX_MEDIA_URL_MAX_AGE = -1  # everything is already too old
+        assert unsign_attachment_id(signature) is None
+
+    def test_media_url_is_signed_with_a_timestamp(self, settings):
+        from froide_fax.utils import FAX_MEDIA_SALT, sign_obj_id
+
+        expiring = sign_obj_id(42, salt=FAX_MEDIA_SALT, expires=True)
+        plain = sign_obj_id(42, salt=FAX_MEDIA_SALT)
+        # The timestamp adds a segment; without it there is nothing to expire.
+        assert expiring.count(":") == plain.count(":") + 1
+
+    def test_default_window_is_an_hour(self):
+        from froide_fax.utils import get_media_url_max_age
+
+        assert get_media_url_max_age() == 3600
+
+    def test_callback_signature_does_not_expire(self, settings):
+        """Delivery events arrive late; expiring them would drop statuses."""
+        from froide_fax.utils import FAX_CALLBACK_SALT, sign_obj_id, unsign_message_id
+
+        signature = sign_obj_id(7, salt=FAX_CALLBACK_SALT)
+        settings.FAX_MEDIA_URL_MAX_AGE = -1
+        assert unsign_message_id(signature) == 7
+
+    def test_forged_signature_is_still_rejected(self):
+        from froide_fax.utils import unsign_attachment_id
+
+        assert unsign_attachment_id("42:bogus:signature") is None

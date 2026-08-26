@@ -8,7 +8,7 @@ from typing import List, Optional
 import phonenumbers
 from django.conf import settings
 from django.core.serializers.json import DjangoJSONEncoder
-from django.core.signing import BadSignature, Signer
+from django.core.signing import BadSignature, Signer, TimestampSigner
 from django.db import transaction
 from django.urls import reverse
 from django.utils import timezone
@@ -134,7 +134,7 @@ def get_media_url(att):
 
 
 def get_signed_media_url(att):
-    attachment_signature = sign_obj_id(att.pk, salt=FAX_MEDIA_SALT)
+    attachment_signature = sign_obj_id(att.pk, salt=FAX_MEDIA_SALT, expires=True)
     return settings.SITE_URL + reverse(
         "froide_fax-media_url", kwargs={"signed": attachment_signature}
     )
@@ -147,25 +147,63 @@ def get_status_callback_url(message):
     )
 
 
-def sign_obj_id(obj_id, salt=None):
-    signer = Signer(salt=salt)
+# How long a signed media URL stays valid. Telnyx fetches the PDF within
+# seconds of the send call; an hour is slack for a queue backlog, not a working
+# lifetime. Retries are unaffected -- retry_fax_delivery() goes through
+# message.resend() -> run_send(), which calls get_media_url() again and signs
+# afresh.
+FAX_MEDIA_URL_MAX_AGE = 60 * 60
+
+
+def get_media_url_max_age():
+    return getattr(settings, "FAX_MEDIA_URL_MAX_AGE", FAX_MEDIA_URL_MAX_AGE)
+
+
+def sign_obj_id(obj_id, salt=None, expires=False):
+    """Sign an id for a URL that hands out something without authentication.
+
+    `expires` picks TimestampSigner, which embeds the signing time so the
+    verifier can reject an old signature. Used for the media URL: the fax PDF
+    is stored unapproved -- froide's auth gates attachment reads on
+    `approved` -- but fax_media_url streams it with authorized=True so Telnyx
+    can fetch it without credentials. Signed with plain Signer that link never
+    expired, so a URL handed to a third party (and sitting in their access
+    logs) stayed good for the life of the key.
+
+    The status callback keeps the non-expiring signature on purpose: delivery
+    events can arrive long after the send, and expiring them would silently
+    drop statuses.
+    """
+    signer = TimestampSigner(salt=salt) if expires else Signer(salt=salt)
     value = signer.sign("%s@%s" % (obj_id, settings.TELNYX_APP_ID))
     return value
 
 
 def unsign_attachment_id(signature):
-    return unsign_obj_id(signature, salt=FAX_MEDIA_SALT)
+    return unsign_obj_id(
+        signature, salt=FAX_MEDIA_SALT, max_age=get_media_url_max_age()
+    )
 
 
 def unsign_message_id(signature):
     return unsign_obj_id(signature, salt=FAX_CALLBACK_SALT)
 
 
-def unsign_obj_id(signature, salt=None):
-    signer = Signer(salt=salt)
+def unsign_obj_id(signature, salt=None, max_age=None):
+    if max_age is None:
+        signer = Signer(salt=salt)
+        unsign = signer.unsign
+    else:
+        signer = TimestampSigner(salt=salt)
+
+        def unsign(value):
+            return signer.unsign(value, max_age=max_age)
+
     try:
-        original = signer.unsign(signature)
+        original = unsign(signature)
     except BadSignature:
+        # SignatureExpired subclasses BadSignature, so an expired link takes
+        # the same path as a forged one: None here, 403 in the view.
         return None
     parts = original.split("@", 1)
     if len(parts) != 2:

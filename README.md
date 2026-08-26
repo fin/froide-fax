@@ -50,6 +50,25 @@ Four-hourly is deliberate: this is a backstop for a broken webhook, not a
 substitute for one, and polling more often mostly re-asks about faxes that are
 simply slow. Pass `stale_minutes` to the task to override the threshold.
 
+## The fax PDF is served over a signed, expiring URL
+
+The rendered `fax.pdf` is stored as an unapproved `FoiAttachment`, so froide's
+own auth refuses it to everyone but the requester. Telnyx, however, has to fetch
+it without credentials, which `fax_media_url` does by streaming the file with
+`authorized=True` behind a signed URL.
+
+That signature now carries a timestamp and expires after an hour
+(`FAX_MEDIA_URL_MAX_AGE`). Previously it was a plain `Signer` with no expiry, so
+a URL handed to a third party -- and recorded in their access logs -- stayed
+valid for as long as the signing key did.
+
+Retries are unaffected: `retry_fax_delivery()` goes through `message.resend()`
+into `run_send()`, which calls `get_media_url()` again and signs afresh.
+
+The **status callback** URL deliberately keeps its non-expiring signature.
+Delivery events can arrive long after the send, and expiring them would silently
+drop statuses.
+
 ## Fax transport backends
 
 `FAX_BACKEND` names the transport, the way `EMAIL_BACKEND` does for mail. It
