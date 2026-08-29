@@ -92,6 +92,11 @@ def _forbidden(reason):
 @csrf_exempt
 @require_POST
 def fax_status_callback(request: HttpRequest):
+    # Log the raw body once, before any parsing, so a rejected or mis-shaped
+    # webhook can be diagnosed from the delivery Telnyx says it made. DEBUG so
+    # it stays out of production logs.
+    logger.debug("Telnyx fax webhook body: %s", request.body[:2000])
+
     # get relevant signature data
     event_timestamp = request.headers.get("Telnyx-Timestamp")
     event_signature = request.headers.get("Telnyx-Signature-Ed25519")

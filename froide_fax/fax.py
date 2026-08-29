@@ -101,8 +101,21 @@ def send_fax_telnyx(
         "Authorization": authorization,
     }
 
+    sent_at = timezone.now()
     response = requests.post(
         "https://api.telnyx.com/v2/faxes", headers=headers, data=data
+    )
+
+    # Always record the outcome of the send: without this, a fax that Telnyx
+    # accepts with an unexpected body (wrong status code, missing data.id) is
+    # invisible -- the id never gets stored and every later status webhook
+    # silently fails to match a message.
+    logger.info(
+        "Telnyx fax send to %s at %s -> HTTP %s: %s",
+        to,
+        sent_at.isoformat(),
+        response.status_code,
+        response.text[:2000],
     )
 
     try:
