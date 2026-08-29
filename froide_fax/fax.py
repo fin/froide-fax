@@ -208,10 +208,17 @@ class FaxMessageHandler(MessageHandler):
             ds.save()
             return
 
-        # store fax.sid in message 'email_message_id' (misnomer)
-        FoiMessage.objects.filter(pk=fax_message.pk).update(
-            email_message_id=result.fax_id, sent=result.accepted
-        )
+        # Store the Telnyx fax id in 'email_message_id' (a misnomer) -- the
+        # status webhook looks the message up by it.
+        #
+        # Set it on the instance *and* persist, matching EmailMessageHandler.
+        # froide's request-creation flow does `message.save()` immediately after
+        # `message.send()`; a bare `.filter(...).update(...)` here would be
+        # overwritten by that save writing back the stale in-memory instance,
+        # leaving email_message_id empty and every webhook unmatched.
+        fax_message.email_message_id = result.fax_id
+        fax_message.sent = result.accepted
+        fax_message.save(update_fields=["email_message_id", "sent"])
 
     @classmethod
     def _get_metadata(cls, form):

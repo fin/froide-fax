@@ -124,3 +124,38 @@ def test_end_to_end_creates_the_pdf_without_sending(email_message):
     fax_message.refresh_from_db()
     assert fax_message.email_message_id == outbox[0].fax_id
     assert fax_message.sent is True
+
+
+@pytest.mark.django_db
+@override_settings(FAX_BACKEND=DUMMY)
+def test_save_after_send_keeps_the_fax_id(faxable_publicbody):
+    """froide's request-creation flow does `message.save()` right after
+    `message.send()`. run_send must set email_message_id / sent on the *instance*
+    (as EmailMessageHandler does), not only via a bare .filter().update(): that
+    save would otherwise write the stale instance back and blank the fax id, so
+    the status webhook could never match the message.
+    """
+    from froide.foirequest.models.message import MessageKind
+    from froide.foirequest.tests import factories
+
+    from froide_fax.fax import FaxMessageHandler
+
+    foirequest = factories.FoiRequestFactory(public_body=faxable_publicbody)
+    message = factories.FoiMessageFactory(
+        request=foirequest,
+        kind=MessageKind.FAX,
+        recipient_public_body=faxable_publicbody,
+        sender_user=foirequest.user,
+        is_response=False,
+        status=None,
+        sent=False,
+        email_message_id="",
+    )
+
+    FaxMessageHandler(message).run_send()
+    message.save()  # mirrors froide/foirequest/services.py
+
+    message.refresh_from_db()
+    assert message.email_message_id == outbox[-1].fax_id
+    assert message.email_message_id != ""
+    assert message.sent is True
