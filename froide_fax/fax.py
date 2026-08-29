@@ -9,6 +9,7 @@ from froide.foirequest.message_handlers import MessageHandler
 from froide.foirequest.models import DeliveryStatus, FoiAttachment, FoiMessage
 from froide.foirequest.models.message import MessageKind
 from froide.helper.widgets import BootstrapCheckboxInput
+from froide.problem.models import ProblemReport
 
 from .backends import FaxSendResult, get_fax_backend
 from .forms import SignatureField, save_signature_for_user
@@ -232,6 +233,19 @@ class FaxMessageHandler(MessageHandler):
                 },
             )
             ds.save()
+            # The provider rejected the send outright: the fax never entered the
+            # queue, so no status webhook will ever arrive to trigger the
+            # ProblemReport that a delivery-time failure does. Raise one here so
+            # the failure reaches the moderation queue instead of sitting in a
+            # DeliveryStatus row nobody looks at. No auto-retry -- an API
+            # rejection means a malformed request or a misconfigured account,
+            # and resending the same payload fails identically.
+            ProblemReport.objects.report(
+                message=fax_message,
+                kind=ProblemReport.PROBLEM.BOUNCE_PUBLICBODY,
+                description=ds.log,
+                auto_submitted=True,
+            )
             return
 
         # Store the Telnyx fax id in 'email_message_id' (a misnomer) -- the

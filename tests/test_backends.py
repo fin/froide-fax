@@ -159,3 +159,41 @@ def test_save_after_send_keeps_the_fax_id(faxable_publicbody):
     assert message.email_message_id == outbox[-1].fax_id
     assert message.email_message_id != ""
     assert message.sent is True
+
+
+@pytest.mark.django_db
+def test_send_rejected_by_provider_reports_a_problem(faxable_publicbody, monkeypatch):
+    """A provider rejection at send time never produces a status webhook, so
+    run_send must surface it -- FAILED status *and* a ProblemReport, so it
+    reaches the moderation queue instead of a DeliveryStatus row nobody reads.
+    """
+    from froide.foirequest.models import DeliveryStatus
+    from froide.foirequest.models.message import MessageKind
+    from froide.foirequest.tests import factories
+    from froide.problem.models import ProblemReport
+
+    from froide_fax.fax import FaxFailedException, FaxMessageHandler
+
+    def boom(*a, **kw):
+        raise FaxFailedException("insufficient balance")
+
+    monkeypatch.setattr("froide_fax.fax.send_fax", boom)
+
+    foirequest = factories.FoiRequestFactory(public_body=faxable_publicbody)
+    message = factories.FoiMessageFactory(
+        request=foirequest,
+        kind=MessageKind.FAX,
+        recipient_public_body=faxable_publicbody,
+        sender_user=foirequest.user,
+        is_response=False,
+        status=None,
+    )
+
+    FaxMessageHandler(message).run_send()
+
+    assert message.deliverystatus.status == DeliveryStatus.Delivery.STATUS_FAILED
+    report = ProblemReport.objects.get(message=message)
+    assert report.kind == ProblemReport.PROBLEM.BOUNCE_PUBLICBODY
+    assert report.auto_submitted is True
+    assert not report.resolved
+    assert "insufficient balance" in report.description
