@@ -83,6 +83,41 @@ class TestRouting:
         foirequest = factories.FoiRequestFactory(public_body=None)
         assert not FaxMessageHandler.handle_foirequest_outgoing_messages(foirequest)
 
+    def test_reply_to_the_default_address_is_faxed(self, fax_override):
+        pb = fax_override.publicbody
+        foirequest = factories.FoiRequestFactory(public_body=pb)
+        assert FaxMessageHandler.handle_foirequest_outgoing_messages(
+            foirequest, recipient_email=pb.email.upper()
+        )
+        assert (
+            get_request_outgoing_message_kind(foirequest, recipient_email=pb.email)
+            == MessageKind.FAX
+        )
+
+    def test_reply_to_a_different_address_still_goes_by_email(self, fax_override):
+        foirequest = factories.FoiRequestFactory(public_body=fax_override.publicbody)
+        other = "caseworker@authority.example.org"
+        assert not FaxMessageHandler.handle_foirequest_outgoing_messages(
+            foirequest, recipient_email=other
+        )
+        assert get_request_outgoing_message_kind(foirequest, recipient_email=other) in (
+            None,
+            MessageKind.EMAIL,
+        )
+
+    def test_override_without_a_default_address_never_faxes_a_reply(
+        self, faxable_publicbody
+    ):
+        faxable_publicbody.email = ""
+        faxable_publicbody.save()
+        FaxOverride.objects.create(publicbody=faxable_publicbody, enabled=True)
+        foirequest = factories.FoiRequestFactory(public_body=faxable_publicbody)
+        assert not FaxMessageHandler.handle_foirequest_outgoing_messages(
+            foirequest, recipient_email="anything@example.org"
+        )
+        # ...but the initial request (recipient_email=None) still diverts.
+        assert FaxMessageHandler.handle_foirequest_outgoing_messages(foirequest)
+
 
 class TestSourceMessage:
     def test_copy_renders_its_original(self, email_message):

@@ -169,7 +169,7 @@ def send_fax(fax_number, media_url) -> FaxSendResult:
 
 class FaxMessageHandler(MessageHandler):
     @classmethod
-    def handle_foirequest_outgoing_messages(cls, foirequest):
+    def handle_foirequest_outgoing_messages(cls, foirequest, recipient_email=None):
         """Claim a request whose public body is marked fax-only.
 
         Called by froide's ``get_request_outgoing_message_kind()`` when it
@@ -178,10 +178,21 @@ class FaxMessageHandler(MessageHandler):
         earlier name ``handle_request_outgoing_messages`` was silently never
         invoked. On a froide without that mechanism this is simply never called
         and the package behaves exactly as before.
+
+        ``recipient_email`` is set when a reply picks a specific address. Divert
+        to fax only when that address is the public body's own default -- the
+        one that refuses email. A different address (a mediator, an alternative
+        responsibility address, or one the authority itself replied from) is
+        left to go out by email. ``None`` -- the initial request, where the
+        recipient is the body's default anyway -- keeps diverting.
         """
-        return FaxOverride.objects.is_fax_recipient(
-            getattr(foirequest, "public_body", None)
-        )
+        publicbody = getattr(foirequest, "public_body", None)
+        if not FaxOverride.objects.is_fax_recipient(publicbody):
+            return False
+        if recipient_email is None:
+            return True
+        default = (publicbody.email or "").strip().lower()
+        return bool(default) and recipient_email.strip().lower() == default
 
     def get_fax_number(self):
         """Resolve the number for this message's actual recipient.
