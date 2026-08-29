@@ -148,9 +148,7 @@ class TestSignature:
         forged = Base64Encoder.encode(
             other.sign(("%s|" % ts).encode() + body).signature
         ).decode()
-        response = post_callback(
-            client, signing_key, body, signature=forged
-        )
+        response = post_callback(client, signing_key, body, signature=forged)
         assert response.status_code == 403
 
     def test_tampered_body_is_rejected(self, client, signing_key, fax_message):
@@ -216,7 +214,7 @@ class TestTerminalStatuses:
         )
 
         fax_message.refresh_from_db()
-        log = json.loads(fax_message.deliverystatus.log)
+        log = json.loads(fax_message.deliverystatus.log)[-1]
         assert log["failure_reason"] == "receiver_unallocated_number"
 
 
@@ -301,12 +299,8 @@ class TestEnvelope:
     5xxs and is redelivered forever, so tolerating both stays worthwhile.
     """
 
-    def test_unwrapped_delivered_is_accepted(
-        self, client, signing_key, fax_message
-    ):
-        response = post_callback(
-            client, signing_key, unwrapped(fax_event("delivered"))
-        )
+    def test_unwrapped_delivered_is_accepted(self, client, signing_key, fax_message):
+        response = post_callback(client, signing_key, unwrapped(fax_event("delivered")))
 
         assert response.status_code == 200
         fax_message.refresh_from_db()
@@ -329,12 +323,8 @@ class TestEnvelope:
         fax_message.refresh_from_db()
         assert fax_message.deliverystatus.status == Delivery.STATUS_FAILED
 
-    def test_unwrapped_inbound_is_acknowledged(
-        self, client, signing_key, fax_message
-    ):
-        response = post_callback(
-            client, signing_key, unwrapped(fax_event("receiving"))
-        )
+    def test_unwrapped_inbound_is_acknowledged(self, client, signing_key, fax_message):
+        response = post_callback(client, signing_key, unwrapped(fax_event("receiving")))
 
         assert response.status_code == 200
 
@@ -343,7 +333,7 @@ class TestEnvelope:
     ):
         post_callback(client, signing_key, fax_event("delivered"))
         fax_message.refresh_from_db()
-        wrapped_log = json.loads(fax_message.deliverystatus.log)
+        wrapped_log = json.loads(fax_message.deliverystatus.log)[-1]
 
         ds = fax_message.deliverystatus
         ds.status = Delivery.STATUS_SENDING
@@ -352,7 +342,7 @@ class TestEnvelope:
 
         post_callback(client, signing_key, unwrapped(fax_event("delivered")))
         fax_message.refresh_from_db()
-        unwrapped_log = json.loads(fax_message.deliverystatus.log)
+        unwrapped_log = json.loads(fax_message.deliverystatus.log)[-1]
 
         # meta.attempt only exists in the wrapped envelope; everything the fax
         # itself reports must be identical.
@@ -426,9 +416,7 @@ class TestReplayWindow:
 
         assert response.status_code == 403
 
-    def test_just_inside_the_window_is_accepted(
-        self, client, signing_key, fax_message
-    ):
+    def test_just_inside_the_window_is_accepted(self, client, signing_key, fax_message):
         response = post_callback(
             client,
             signing_key,
@@ -447,7 +435,7 @@ class TestRedeliveryVisibility:
         post_callback(client, signing_key, body)
 
         fax_message.refresh_from_db()
-        log = json.loads(fax_message.deliverystatus.log)
+        log = json.loads(fax_message.deliverystatus.log)[-1]
         assert log["webhook_attempt"] == 4
 
     def test_redelivery_is_logged(self, client, signing_key, fax_message, caplog):
@@ -508,7 +496,7 @@ class TestSpecExamples:
         assert response.status_code == 200
         fax_message.refresh_from_db()
         assert fax_message.deliverystatus.status == Delivery.STATUS_FAILED
-        log = json.loads(fax_message.deliverystatus.log)
+        log = json.loads(fax_message.deliverystatus.log)[-1]
         # receiver_call_dropped is transient, so this one is retried.
         assert log["failure_reason"] == "receiver_call_dropped"
 
@@ -534,9 +522,7 @@ class TestSpecExamples:
         assert sorted(built) == sorted(example)
         assert sorted(built["data"]) == sorted(example["data"])
         assert sorted(built["meta"]) == sorted(example["meta"])
-        assert sorted(built["data"]["payload"]) == sorted(
-            example["data"]["payload"]
-        )
+        assert sorted(built["data"]["payload"]) == sorted(example["data"]["payload"])
 
     def test_failed_example_carries_an_internal_reason(self):
         """Telnyx sends a second, finer-grained reason we currently discard."""

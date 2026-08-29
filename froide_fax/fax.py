@@ -14,7 +14,13 @@ from .backends import FaxSendResult, get_fax_backend
 from .forms import SignatureField, save_signature_for_user
 from .models import FaxOverride
 from .pdf_generator import FaxMessagePDFGenerator
-from .utils import create_fax_message, ensure_fax_number, get_media_url, get_signature
+from .utils import (
+    create_fax_log,
+    create_fax_message,
+    ensure_fax_number,
+    get_media_url,
+    get_signature,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -217,7 +223,14 @@ class FaxMessageHandler(MessageHandler):
             result = send_fax(fax_number, media_url)
         except FaxFailedException as e:
             ds.status = DeliveryStatus.Delivery.STATUS_FAILED
-            ds.log = e.msg
+            ds.log = create_fax_log(
+                ds.log,
+                {
+                    "status": "failed",
+                    "detail": e.msg,
+                    "date_created": timezone.now(),
+                },
+            )
             ds.save()
             return
 

@@ -441,24 +441,53 @@ def fax_log_from_api(fax_data):
 
 
 def create_fax_log(previous_log, data):
-    return json.dumps(data, cls=DjangoJSONEncoder)
+    """Append one entry to a DeliveryStatus log, returning the new JSON.
+
+    The log is a JSON array, oldest first -- so the send, media.processed,
+    sending.started and delivered/failed events of one fax all survive instead
+    of each overwriting the last. A previous value that is not already such an
+    array (empty, a single legacy JSON object, or pre-Telnyx Twilio text)
+    becomes the first entry, so nothing already stored is lost.
+    """
+    history = []
+    if previous_log:
+        try:
+            existing = json.loads(previous_log)
+            history = existing if isinstance(existing, list) else [existing]
+        except (ValueError, TypeError):
+            history = [previous_log]
+    history.append(data)
+    return json.dumps(history, cls=DjangoJSONEncoder)
 
 
 def parse_fax_log(deliverystatus):
+    """Return the latest log entry as a dict, dates parsed.
+
+    ``DeliveryStatus.log`` is a JSON array (see ``create_fax_log``); the fax
+    report renders the tip. Single-object and legacy Twilio-text logs are still
+    read.
+    """
     log = deliverystatus.log
+    if not log:
+        return
     try:
-        data = json.loads(log)
+        parsed = json.loads(log)
+    except (ValueError, TypeError):
+        parsed = None
+    if parsed is not None:
+        entries = parsed if isinstance(parsed, list) else [parsed]
+        data = entries[-1] if entries else {}
+        if not isinstance(data, dict):
+            return {}
         date_fields = ("date_created", "date_updated")
         for key in date_fields:
             try:
                 data[key] = datetime.fromisoformat(data[key].replace("Z", ""))
                 # Make datetimes timezone aware and set to UTC (as stored in DB)
                 data[key] = data[key].replace(tzinfo=tz.utc)
-            except (ValueError, KeyError):
+            except (ValueError, KeyError, TypeError, AttributeError):
                 data[key] = None
         return data
-    except ValueError:
-        pass
     if "FaxSid: " in log:
         data = parse_twilio_fax_log(log)
         if data is None:

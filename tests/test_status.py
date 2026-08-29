@@ -56,8 +56,15 @@ def replacement_fax(fax_override):
 
 class TestStatusMapping:
     @pytest.mark.parametrize(
-        "raw", ["queued", "initiated", "originated", "media.processing",
-                "media.processed", "sending"]
+        "raw",
+        [
+            "queued",
+            "initiated",
+            "originated",
+            "media.processing",
+            "media.processed",
+            "sending",
+        ],
     )
     def test_in_progress_states_map_to_sending(self, raw):
         assert map_telnyx_status(raw) == Delivery.STATUS_SENDING
@@ -122,6 +129,22 @@ class TestApplyFaxStatus:
         assert ProblemReport.objects.filter(
             message=replacement_fax, kind=ProblemReport.PROBLEM.BOUNCE_PUBLICBODY
         ).exists()
+
+    def test_the_log_accumulates_across_status_updates(self, replacement_fax):
+        import json
+
+        apply_fax_status(
+            replacement_fax,
+            Delivery.STATUS_SENDING,
+            log={"status": "media.processed"},
+        )
+        apply_fax_status(
+            replacement_fax, Delivery.STATUS_SENT, log={"status": "delivered"}
+        )
+
+        replacement_fax.refresh_from_db()
+        entries = json.loads(replacement_fax.deliverystatus.log)
+        assert [e["status"] for e in entries] == ["media.processed", "delivered"]
 
 
 class TestSweep:
@@ -236,9 +259,7 @@ class TestPermanentFailures:
             "fax_initial_communication_timeout",
         ],
     )
-    def test_transient_reasons_still_retry(
-        self, replacement_fax, monkeypatch, reason
-    ):
+    def test_transient_reasons_still_retry(self, replacement_fax, monkeypatch, reason):
         scheduled = []
         monkeypatch.setattr(
             "froide_fax.tasks.retry_fax_delivery.apply_async",

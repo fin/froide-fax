@@ -124,13 +124,16 @@ def apply_fax_status(
     """
     from .delivery import send_fax_sent_confirmation
     from .tasks import retry_fax_delivery
+    from .utils import create_fax_log
 
     ds, _created = DeliveryStatus.objects.update_or_create(
         message=fax_message,
         defaults=dict(status=delivery_status, last_update=timezone.now()),
     )
     if log:
-        ds.log = log
+        # `log` is one entry (a dict, or a bare string); append it to whatever
+        # is already stored rather than replacing it.
+        ds.log = create_fax_log(ds.log, log)
         ds.save(update_fields=["log"])
 
     if delivery_status == Delivery.STATUS_SENT:

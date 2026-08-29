@@ -108,4 +108,25 @@ def test_survives_the_json_round_trip():
         fax_log_from_api(API_FAX),
         fax_log_from_webhook(WEBHOOK_PAYLOAD, OCCURRED_AT),
     ):
-        assert json.loads(create_fax_log(None, log))["sid"] == "fax-1234"
+        assert json.loads(create_fax_log(None, log))[-1]["sid"] == "fax-1234"
+
+
+def test_create_fax_log_appends_oldest_first():
+    first = create_fax_log(None, {"status": "queued"})
+    second = create_fax_log(first, {"status": "media.processed"})
+    third = create_fax_log(second, {"status": "delivered"})
+
+    assert [e["status"] for e in json.loads(third)] == [
+        "queued",
+        "media.processed",
+        "delivered",
+    ]
+
+
+def test_create_fax_log_keeps_a_non_array_previous_as_entry_zero():
+    from_object = json.loads(create_fax_log('{"status": "old"}', {"status": "new"}))
+    assert [e["status"] for e in from_object] == ["old", "new"]
+
+    from_text = json.loads(create_fax_log("FaxSid: FX123\nTo: x", {"status": "new"}))
+    assert from_text[0] == "FaxSid: FX123\nTo: x"
+    assert from_text[1] == {"status": "new"}

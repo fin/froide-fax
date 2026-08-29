@@ -42,7 +42,6 @@ from .status import (
     unwrap_event,
 )
 from .utils import (
-    create_fax_log,
     create_fax_message,
     fax_log_from_webhook,
     message_can_be_faxed,
@@ -194,7 +193,7 @@ def fax_status_callback(request: HttpRequest):
     apply_fax_status(
         fax_message,
         status,
-        log=create_fax_log(None, fax_log_data),
+        log=fax_log_data,
         failure_reason=fax_log_data["failure_reason"],
     )
 
