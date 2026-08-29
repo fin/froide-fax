@@ -1,6 +1,7 @@
 import datetime
 import json
 import logging
+from urllib.parse import urljoin
 
 from django.conf import settings
 from django.contrib import messages
@@ -33,6 +34,7 @@ from froide_fax.fax import convert_to_fax_bytes
 from .forms import SignatureForm
 from .models import FAX_PERMISSION
 from .pdf_generator import FaxReportPDFGenerator
+from .tasks import retry_fax_delivery
 from .status import (
     INBOUND_STATUSES,
     apply_fax_status,
@@ -59,6 +61,12 @@ def fax_media_url(request, signed):
 
     attachment = get_object_or_404(FoiAttachment, pk=attachment_id)
     url = attachment.get_absolute_domain_file_url(authorized=True)
+
+    # get_absolute_domain_file_url() only prepends the *domain part* of
+    # MEDIA_URL, so it is relative whenever MEDIA_URL has no host -- the default
+    # in development ("/files/"). requests.get() then raises MissingSchema.
+    # Resolve against SITE_URL; a URL that is already absolute is left as is.
+    url = urljoin(settings.SITE_URL, url)
 
     # Telnyx does not support redirects
     # So stream response from CDN URL here

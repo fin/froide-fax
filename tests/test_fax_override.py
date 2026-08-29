@@ -1,6 +1,9 @@
 import pytest
 
-from froide.foirequest.message_handlers import get_message_handler_class
+from froide.foirequest.message_handlers import (
+    get_message_handler_class,
+    get_request_outgoing_message_kind,
+)
 from froide.foirequest.models.message import MessageKind
 from froide.foirequest.tests import factories
 from froide.publicbody.factories import PublicBodyFactory
@@ -53,16 +56,32 @@ class TestRouting:
 
     def test_claims_request_to_overridden_body(self, fax_override):
         foirequest = factories.FoiRequestFactory(public_body=fax_override.publicbody)
-        assert FaxMessageHandler.handle_request_outgoing_messages(foirequest)
+        assert FaxMessageHandler.handle_foirequest_outgoing_messages(foirequest)
+
+    def test_froide_routes_overridden_request_to_fax_kind(self, fax_override):
+        """The hook must be wired to froide's dispatcher, not just callable.
+
+        froide calls ``handle_foirequest_outgoing_messages`` by that exact name;
+        a mismatch leaves this returning None and the request goes out by email.
+        """
+        foirequest = factories.FoiRequestFactory(public_body=fax_override.publicbody)
+        assert get_request_outgoing_message_kind(foirequest) == MessageKind.FAX
+
+    def test_froide_routes_normal_request_to_email_kind(self, db):
+        foirequest = factories.FoiRequestFactory(public_body=PublicBodyFactory())
+        assert get_request_outgoing_message_kind(foirequest) in (
+            None,
+            MessageKind.EMAIL,
+        )
 
     def test_does_not_claim_other_bodies(self, db):
         foirequest = factories.FoiRequestFactory(public_body=PublicBodyFactory())
-        assert not FaxMessageHandler.handle_request_outgoing_messages(foirequest)
+        assert not FaxMessageHandler.handle_foirequest_outgoing_messages(foirequest)
 
     def test_does_not_claim_request_without_body(self, db):
         # public_body is null=True / SET_NULL, so orphaned requests exist.
         foirequest = factories.FoiRequestFactory(public_body=None)
-        assert not FaxMessageHandler.handle_request_outgoing_messages(foirequest)
+        assert not FaxMessageHandler.handle_foirequest_outgoing_messages(foirequest)
 
 
 class TestSourceMessage:

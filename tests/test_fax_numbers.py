@@ -123,8 +123,6 @@ class TestSignedMediaUrl:
     """
 
     def test_media_signature_expires(self, settings):
-        from django.core.signing import TimestampSigner
-
         from froide_fax.utils import FAX_MEDIA_SALT, sign_obj_id, unsign_attachment_id
 
         signature = sign_obj_id(42, salt=FAX_MEDIA_SALT, expires=True)
@@ -158,3 +156,38 @@ class TestSignedMediaUrl:
         from froide_fax.utils import unsign_attachment_id
 
         assert unsign_attachment_id("42:bogus:signature") is None
+
+    def test_media_view_fetches_an_absolute_url(self, settings, client, monkeypatch):
+        """fax_media_url proxies the PDF with requests.get(), which needs a
+        scheme. get_absolute_domain_file_url() only prepends MEDIA_URL's domain
+        part, so with a path-only MEDIA_URL (the dev default) the URL was
+        relative and requests raised MissingSchema.
+        """
+        from django.urls import reverse
+
+        from froide.foirequest.tests import factories
+
+        from froide_fax.utils import FAX_MEDIA_SALT, sign_obj_id
+
+        settings.MEDIA_URL = "/files/"
+
+        attachment = factories.FoiAttachmentFactory(name="fax.pdf", approved=False)
+
+        captured = {}
+
+        class FakeResponse:
+            raw = b""
+            headers = {"content-type": "application/pdf"}
+            status_code = 200
+            reason = "OK"
+
+        def fake_get(url, **kwargs):
+            captured["url"] = url
+            return FakeResponse()
+
+        monkeypatch.setattr("froide_fax.views.requests.get", fake_get)
+
+        signed = sign_obj_id(attachment.pk, salt=FAX_MEDIA_SALT, expires=True)
+        client.get(reverse("froide_fax-media_url", kwargs={"signed": signed}))
+
+        assert captured["url"].startswith(("http://", "https://"))

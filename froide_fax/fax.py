@@ -149,12 +149,15 @@ def send_fax(fax_number, media_url) -> FaxSendResult:
 
 class FaxMessageHandler(MessageHandler):
     @classmethod
-    def handle_request_outgoing_messages(cls, foirequest):
+    def handle_foirequest_outgoing_messages(cls, foirequest):
         """Claim a request whose public body is marked fax-only.
 
-        Called by froide when it decides an outgoing message's kind. On a froide
-        without that mechanism this is simply never invoked and the package
-        behaves exactly as before.
+        Called by froide's ``get_request_outgoing_message_kind()`` when it
+        decides an outgoing message's kind (froide commit 7520e6a2b). The method
+        name must match froide's base ``MessageHandler`` hook exactly -- the
+        earlier name ``handle_request_outgoing_messages`` was silently never
+        invoked. On a froide without that mechanism this is simply never called
+        and the package behaves exactly as before.
         """
         return FaxOverride.objects.is_fax_recipient(
             getattr(foirequest, "public_body", None)
