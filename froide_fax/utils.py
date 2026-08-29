@@ -440,45 +440,57 @@ def fax_log_from_api(fax_data):
     )
 
 
-def create_fax_log(previous_log, data):
-    """Append one entry to a DeliveryStatus log, returning the new JSON.
+def fax_log_entries(log):
+    """Every stored log entry, oldest first, whatever shape ``log`` is in.
 
-    The log is a JSON array, oldest first -- so the send, media.processed,
-    sending.started and delivered/failed events of one fax all survive instead
-    of each overwriting the last. A previous value that is not already such an
-    array (empty, a single legacy JSON object, or pre-Telnyx Twilio text)
-    becomes the first entry, so nothing already stored is lost.
+    The current format is newline-delimited JSON -- one entry per line, so the
+    stored value stays readable. Older values are migrated on read: a single
+    JSON object, the short-lived JSON-array format, and pre-Telnyx Twilio text
+    (kept verbatim as one string entry).
     """
-    history = []
-    if previous_log:
+    if not log:
+        return []
+    stripped = log.lstrip()
+    if stripped.startswith("["):
         try:
-            existing = json.loads(previous_log)
-            history = existing if isinstance(existing, list) else [existing]
-        except (ValueError, TypeError):
-            history = [previous_log]
-    history.append(data)
-    return json.dumps(history, cls=DjangoJSONEncoder)
+            value = json.loads(log)
+            if isinstance(value, list):
+                return value
+        except ValueError:
+            pass
+    lines = [line for line in log.splitlines() if line.strip()]
+    try:
+        return [json.loads(line) for line in lines]
+    except ValueError:
+        return [log]
+
+
+def create_fax_log(previous_log, data):
+    """Append one entry to a DeliveryStatus log, returning the new value.
+
+    Newline-delimited JSON, oldest first -- so the send, media.processed,
+    sending.started and delivered/failed events of one fax all survive instead
+    of each overwriting the last, and the column stays greppable. Whatever
+    ``previous_log`` was (empty, a single JSON object, the old JSON array, or
+    Twilio text) is carried forward as the earlier lines.
+    """
+    entries = fax_log_entries(previous_log)
+    entries.append(data)
+    return "\n".join(json.dumps(entry, cls=DjangoJSONEncoder) for entry in entries)
 
 
 def parse_fax_log(deliverystatus):
     """Return the latest log entry as a dict, dates parsed.
 
-    ``DeliveryStatus.log`` is a JSON array (see ``create_fax_log``); the fax
-    report renders the tip. Single-object and legacy Twilio-text logs are still
-    read.
+    ``DeliveryStatus.log`` is newline-delimited JSON (see ``create_fax_log``);
+    the fax report renders the tip. Legacy Twilio-text logs are still read.
     """
     log = deliverystatus.log
     if not log:
         return
-    try:
-        parsed = json.loads(log)
-    except (ValueError, TypeError):
-        parsed = None
-    if parsed is not None:
-        entries = parsed if isinstance(parsed, list) else [parsed]
-        data = entries[-1] if entries else {}
-        if not isinstance(data, dict):
-            return {}
+    entries = fax_log_entries(log)
+    data = entries[-1] if entries else None
+    if isinstance(data, dict):
         date_fields = ("date_created", "date_updated")
         for key in date_fields:
             try:

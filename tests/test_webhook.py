@@ -26,6 +26,8 @@ from froide.foirequest.models import DeliveryStatus
 from froide.foirequest.models.message import MessageKind
 from froide.foirequest.tests import factories
 
+from froide_fax.utils import fax_log_entries
+
 pytestmark = pytest.mark.django_db
 
 Delivery = DeliveryStatus.Delivery
@@ -214,7 +216,7 @@ class TestTerminalStatuses:
         )
 
         fax_message.refresh_from_db()
-        log = json.loads(fax_message.deliverystatus.log)[-1]
+        log = fax_log_entries(fax_message.deliverystatus.log)[-1]
         assert log["failure_reason"] == "receiver_unallocated_number"
 
 
@@ -333,7 +335,7 @@ class TestEnvelope:
     ):
         post_callback(client, signing_key, fax_event("delivered"))
         fax_message.refresh_from_db()
-        wrapped_log = json.loads(fax_message.deliverystatus.log)[-1]
+        wrapped_log = fax_log_entries(fax_message.deliverystatus.log)[-1]
 
         ds = fax_message.deliverystatus
         ds.status = Delivery.STATUS_SENDING
@@ -342,7 +344,7 @@ class TestEnvelope:
 
         post_callback(client, signing_key, unwrapped(fax_event("delivered")))
         fax_message.refresh_from_db()
-        unwrapped_log = json.loads(fax_message.deliverystatus.log)[-1]
+        unwrapped_log = fax_log_entries(fax_message.deliverystatus.log)[-1]
 
         # meta.attempt only exists in the wrapped envelope; everything the fax
         # itself reports must be identical.
@@ -435,7 +437,7 @@ class TestRedeliveryVisibility:
         post_callback(client, signing_key, body)
 
         fax_message.refresh_from_db()
-        log = json.loads(fax_message.deliverystatus.log)[-1]
+        log = fax_log_entries(fax_message.deliverystatus.log)[-1]
         assert log["webhook_attempt"] == 4
 
     def test_redelivery_is_logged(self, client, signing_key, fax_message, caplog):
@@ -496,7 +498,7 @@ class TestSpecExamples:
         assert response.status_code == 200
         fax_message.refresh_from_db()
         assert fax_message.deliverystatus.status == Delivery.STATUS_FAILED
-        log = json.loads(fax_message.deliverystatus.log)[-1]
+        log = fax_log_entries(fax_message.deliverystatus.log)[-1]
         # receiver_call_dropped is transient, so this one is retried.
         assert log["failure_reason"] == "receiver_call_dropped"
 

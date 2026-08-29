@@ -131,7 +131,7 @@ class TestApplyFaxStatus:
         ).exists()
 
     def test_the_log_accumulates_across_status_updates(self, replacement_fax):
-        import json
+        from froide_fax.utils import fax_log_entries
 
         apply_fax_status(
             replacement_fax,
@@ -143,7 +143,9 @@ class TestApplyFaxStatus:
         )
 
         replacement_fax.refresh_from_db()
-        entries = json.loads(replacement_fax.deliverystatus.log)
+        log = replacement_fax.deliverystatus.log
+        assert log.count("\n") == 1  # newline-delimited, one entry per line
+        entries = fax_log_entries(log)
         assert [e["status"] for e in entries] == ["media.processed", "delivered"]
 
 

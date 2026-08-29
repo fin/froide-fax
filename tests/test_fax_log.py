@@ -12,11 +12,10 @@ with blank sender, recipient, page count, duration and date -- and one that
 arrived by callback did not. These tests pin the two paths together.
 """
 
-import json
-
 from froide_fax.utils import (
     FAX_LOG_FIELDS,
     create_fax_log,
+    fax_log_entries,
     fax_log_from_api,
     fax_log_from_webhook,
 )
@@ -108,25 +107,38 @@ def test_survives_the_json_round_trip():
         fax_log_from_api(API_FAX),
         fax_log_from_webhook(WEBHOOK_PAYLOAD, OCCURRED_AT),
     ):
-        assert json.loads(create_fax_log(None, log))[-1]["sid"] == "fax-1234"
+        assert fax_log_entries(create_fax_log(None, log))[-1]["sid"] == "fax-1234"
 
 
-def test_create_fax_log_appends_oldest_first():
+def test_create_fax_log_appends_as_ndjson_oldest_first():
     first = create_fax_log(None, {"status": "queued"})
     second = create_fax_log(first, {"status": "media.processed"})
     third = create_fax_log(second, {"status": "delivered"})
 
-    assert [e["status"] for e in json.loads(third)] == [
+    assert third.count("\n") == 2  # one entry per line, still readable
+    assert [e["status"] for e in fax_log_entries(third)] == [
         "queued",
         "media.processed",
         "delivered",
     ]
 
 
-def test_create_fax_log_keeps_a_non_array_previous_as_entry_zero():
-    from_object = json.loads(create_fax_log('{"status": "old"}', {"status": "new"}))
+def test_create_fax_log_carries_forward_a_legacy_previous():
+    # a single legacy JSON object
+    from_object = fax_log_entries(
+        create_fax_log('{"status": "old"}', {"status": "new"})
+    )
     assert [e["status"] for e in from_object] == ["old", "new"]
 
-    from_text = json.loads(create_fax_log("FaxSid: FX123\nTo: x", {"status": "new"}))
+    # the short-lived JSON-array format
+    from_array = fax_log_entries(
+        create_fax_log('[{"status": "a"}, {"status": "b"}]', {"status": "c"})
+    )
+    assert [e["status"] for e in from_array] == ["a", "b", "c"]
+
+    # pre-Telnyx Twilio text, kept verbatim as the first entry
+    from_text = fax_log_entries(
+        create_fax_log("FaxSid: FX123\nTo: x", {"status": "new"})
+    )
     assert from_text[0] == "FaxSid: FX123\nTo: x"
     assert from_text[1] == {"status": "new"}
