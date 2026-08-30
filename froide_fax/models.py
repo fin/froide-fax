@@ -126,6 +126,14 @@ class FaxOverride(models.Model):
         blank=True,
         help_text=_("Leave blank to use the public body's own fax number."),
     )
+    email_copy = models.EmailField(
+        _("email carbon copy"),
+        blank=True,
+        help_text=_(
+            "If set, every message faxed to this public body is also sent to "
+            "this address by email, as a separate message in the request thread."
+        ),
+    )
     note = models.TextField(_("note"), blank=True)
 
     created_at = models.DateTimeField(auto_now_add=True)
@@ -157,9 +165,7 @@ class FaxOverride(models.Model):
         from .utils import parse_fax_number
 
         if self.fax_number and parse_fax_number(self.fax_number) is None:
-            raise ValidationError(
-                {"fax_number": _("This is not a usable fax number.")}
-            )
+            raise ValidationError({"fax_number": _("This is not a usable fax number.")})
         if self.enabled and not self.number:
             raise ValidationError(
                 {

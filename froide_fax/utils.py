@@ -65,6 +65,22 @@ def parse_fax_number(number: str, region: str = None) -> Optional[str]:
     return phonenumbers.format_number(parsed, phonenumbers.PhoneNumberFormat.E164)
 
 
+def format_fax_number(number: str) -> str:
+    """A human-readable rendering of an E164 number, for display in text.
+
+    Falls back to the input unchanged if it cannot be parsed.
+    """
+    if not number:
+        return ""
+    try:
+        parsed = phonenumbers.parse(number, get_fax_region())
+    except phonenumbers.phonenumberutil.NumberParseException:
+        return number
+    return phonenumbers.format_number(
+        parsed, phonenumbers.PhoneNumberFormat.INTERNATIONAL
+    )
+
+
 def normalize_publicbody_fax(publicbody) -> Optional[str]:
     """Rewrite publicbody.fax to E164 in place, clearing impossible numbers.
 

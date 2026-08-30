@@ -19,9 +19,15 @@ admin.site.register(Signature, SignatureAdmin)
 
 
 class FaxOverrideAdmin(admin.ModelAdmin):
-    list_display = ("publicbody", "enabled", "effective_number", "updated_at")
+    list_display = (
+        "publicbody",
+        "enabled",
+        "effective_number",
+        "email_copy",
+        "updated_at",
+    )
     list_filter = ("enabled",)
-    search_fields = ("publicbody__name", "fax_number")
+    search_fields = ("publicbody__name", "fax_number", "email_copy")
     raw_id_fields = ("publicbody",)
     readonly_fields = ("created_at", "updated_at")
 

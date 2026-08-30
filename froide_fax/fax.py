@@ -19,6 +19,7 @@ from .utils import (
     create_fax_log,
     create_fax_message,
     ensure_fax_number,
+    format_fax_number,
     get_media_url,
     get_signature,
 )
@@ -56,6 +57,65 @@ def get_fax_attachment(fax_message):
         if att.name == FAX_ATTACHMENT_NAME:
             return att
     return None
+
+
+def send_email_copy(
+    fax_message: FoiMessage, recipient_email: str, fax_number: str = ""
+):
+    """Send a plain-text email duplicate of a faxed message.
+
+    For a FaxOverride that carries an ``email_copy`` address: the authority
+    refuses email requests, but a caseworker or an archive still gets a
+    readable copy. A real FoiMessage (``kind=EMAIL``, ``original`` pointing at
+    the fax) so it shows in the request thread, and idempotent per fax message
+    so a resend does not pile up copies. Returns the copy, or the existing one.
+
+    ``fax_number`` is prepended as a one-line note so the recipient knows the
+    request also went out by fax.
+    """
+    if not recipient_email:
+        return None
+
+    existing = FoiMessage.objects.filter(
+        original=fax_message,
+        kind=MessageKind.EMAIL,
+        recipient_email=recipient_email,
+    ).first()
+    if existing is not None:
+        return existing
+
+    source = get_fax_source_message(fax_message)
+    publicbody = fax_message.recipient_public_body
+
+    def _with_note(body):
+        if not fax_number:
+            return body
+        note = _("(Sent by email and by fax to %(number)s.)") % {
+            "number": format_fax_number(fax_number)
+        }
+        return "%s\n\n%s" % (note, body)
+
+    subject_prefix = _("Fax copy: ")
+
+    copy = FoiMessage.objects.create(
+        request=fax_message.request,
+        kind=MessageKind.EMAIL,
+        is_response=False,
+        original=fax_message,
+        subject=subject_prefix + fax_message.subject,
+        subject_redacted=subject_prefix + fax_message.subject_redacted,
+        sender_user=fax_message.sender_user,
+        sender_name=fax_message.sender_name,
+        sender_email=fax_message.sender_email,
+        recipient_email=recipient_email,
+        recipient_public_body=publicbody,
+        recipient=(publicbody.name if publicbody else fax_message.recipient),
+        plaintext=_with_note(source.plaintext),
+        plaintext_redacted=_with_note(source.plaintext_redacted),
+        timestamp=timezone.now(),
+    )
+    copy.send()
+    return copy
 
 
 def create_fax_attachment(fax_message):
@@ -270,6 +330,22 @@ class FaxMessageHandler(MessageHandler):
         fax_message.email_message_id = result.fax_id
         fax_message.sent = result.accepted
         fax_message.save(update_fields=["email_message_id", "sent"])
+
+        override = FaxOverride.objects.get_for_publicbody(
+            fax_message.recipient_public_body
+        )
+        if override is not None and override.email_copy:
+            # The fax already went; a failed copy must not fail the send.
+            try:
+                send_email_copy(
+                    fax_message, override.email_copy, fax_number=override.number
+                )
+            except Exception:
+                logger.exception(
+                    "Fax email copy to %s failed for message %s",
+                    override.email_copy,
+                    fax_message.pk,
+                )
 
     @classmethod
     def _get_metadata(cls, form):
