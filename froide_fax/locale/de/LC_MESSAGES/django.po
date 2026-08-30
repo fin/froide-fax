@@ -7,7 +7,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: \n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-03-16 16:45+0000\n"
+"POT-Creation-Date: 2026-08-30 11:25-0500\n"
 "PO-Revision-Date: 2026-03-16 16:46+0000\n"
 "Last-Translator: Stefan Wehrmeyer <stefan.wehrmeyer@okfn.de>\n"
 "Language-Team: \n"
@@ -18,47 +18,134 @@ msgstr ""
 "Plural-Forms: nplurals=2; plural=(n != 1);\n"
 "X-Generator: Poedit 3.9\n"
 
-#: apps.py
+#: froide_fax/admin.py:34
+msgid "effective number"
+msgstr ""
+
+#: froide_fax/apps.py:9
 msgid "Froide Fax App"
 msgstr "Froide Fax App"
 
-#: fax.py
+#: froide_fax/delivery.py:40
+msgid "Your Freedom of Information Request was sent"
+msgstr ""
+
+#: froide_fax/delivery.py:45
+#, fuzzy
+#| msgid "Send message as fax"
+msgid "Your message was sent"
+msgstr "Nachricht als Fax versenden"
+
+#: froide_fax/fax.py:93
+#, python-format
+msgid "(Sent by email and by fax to %(number)s.)"
+msgstr "(Per Mail und Fax an %(number)s.)"
+
+#: froide_fax/fax.py:98
+msgid "Fax copy: "
+msgstr "Faxkopie: "
+
+#: froide_fax/fax.py:364
 msgid "Send message as fax"
 msgstr "Nachricht als Fax versenden"
 
-#: fax.py
-msgid "In addition to email you can send this message as a fax if the response needs to be signed."
-msgstr "Zusätzlich zur E-Mail können Sie die Nachricht als Fax versenden, wenn Ihre Antwort schriftlich mit Unterschrift sein muss."
+#: froide_fax/fax.py:366
+msgid ""
+"In addition to email you can send this message as a fax if the response "
+"needs to be signed."
+msgstr ""
+"Zusätzlich zur E-Mail können Sie die Nachricht als Fax versenden, wenn Ihre "
+"Antwort schriftlich mit Unterschrift sein muss."
 
-#: fax.py
+#: froide_fax/fax.py:391
 msgid "You need to provide a signature to send a fax message."
-msgstr "Sie müssen eine Unterschrift eintragen, um eine Fax-Nachricht versenden zu können."
+msgstr ""
+"Sie müssen eine Unterschrift eintragen, um eine Fax-Nachricht versenden zu "
+"können."
 
-#: models.py
+#: froide_fax/models.py:29
 msgid "Can always send fax messages"
 msgstr "Kann imm Fax-Nachrichten senden"
 
-#: models.py
+#: froide_fax/models.py:34
 msgid "User"
 msgstr "Nutzer"
 
-#: models.py
+#: froide_fax/models.py:42
 msgid "Signature"
 msgstr "Unterschrift"
 
-#: models.py
+#: froide_fax/models.py:43
 msgid "Signatures"
 msgstr "Unterschriften"
 
-#: templates/froide_fax/_resend_message_form.html
+#: froide_fax/models.py:116
+msgid "public body"
+msgstr ""
+
+#: froide_fax/models.py:119
+msgid "enabled"
+msgstr ""
+
+#: froide_fax/models.py:121
+msgid "Uncheck to fall back to email without deleting this entry."
+msgstr ""
+
+#: froide_fax/models.py:124
+msgid "fax number override"
+msgstr ""
+
+#: froide_fax/models.py:127
+msgid "Leave blank to use the public body's own fax number."
+msgstr ""
+
+#: froide_fax/models.py:130
+msgid "email carbon copy"
+msgstr ""
+
+#: froide_fax/models.py:133
+msgid ""
+"If set, every message faxed to this public body is also sent to this address "
+"by email, as a separate message in the request thread."
+msgstr ""
+
+#: froide_fax/models.py:137
+msgid "note"
+msgstr ""
+
+#: froide_fax/models.py:145
+msgid "fax override"
+msgstr ""
+
+#: froide_fax/models.py:146
+msgid "fax overrides"
+msgstr ""
+
+#: froide_fax/models.py:150
+msgid "no number"
+msgstr ""
+
+#: froide_fax/models.py:168
+msgid "This is not a usable fax number."
+msgstr ""
+
+#: froide_fax/models.py:173
+msgid ""
+"This public body has no usable fax number, so one must be given here for the "
+"override to have any effect."
+msgstr ""
+
+#: froide_fax/templates/froide_fax/_resend_message_form.html:6
 msgid "Resend Message"
 msgstr "Nachricht erneut versenden"
 
-#: templates/froide_fax/_send_message_form.html
+#: froide_fax/templates/froide_fax/_send_message_form.html:5
+#: froide_fax/templates/froide_fax/_send_message_form.html:13
+#: froide_fax/templates/froide_fax/_send_message_form.html:35
 msgid "Send as fax"
 msgstr "Als Fax versenden"
 
-#: templates/froide_fax/_send_message_form.html
+#: froide_fax/templates/froide_fax/_send_message_form.html:24
 #, python-format
 msgid ""
 "\n"
@@ -69,86 +156,95 @@ msgstr ""
 "              Fax an %(name)s senden mit der Faxnummer %(fax_number)s.\n"
 "            "
 
-#: templates/froide_fax/_send_message_form.html
+#: froide_fax/templates/froide_fax/_send_message_form.html:30
 msgid "Preview fax PDF"
 msgstr "Vorschau des Fax-PDFs"
 
-#: templates/froide_fax/_show_report_link.html
+#: froide_fax/templates/froide_fax/_show_report_link.html:4
 msgid "Get Fax report"
 msgstr "Fax-Sendebericht"
 
-#: templates/froide_fax/_signature_form.html
+#: froide_fax/templates/froide_fax/_signature_form.html:6
 msgid "Save your signature"
 msgstr "Speichern Sie Ihre Unterschrift"
 
-#: templates/froide_fax/_signature_form.html
+#: froide_fax/templates/froide_fax/_signature_form.html:13
 msgid ""
 "\n"
-"            Sometimes public authorities require a written letter with a signature from you.\n"
-"            We can send a letter as a fax with your signature, if you provide it below.\n"
+"            Sometimes public authorities require a written letter with a "
+"signature from you.\n"
+"            We can send a letter as a fax with your signature, if you "
+"provide it below.\n"
 "          "
 msgstr ""
 "\n"
-"            Manche Behörden verlangen schriftliche Nachrichten mit Unterschrift von Ihnen.\n"
-"            Wir können Ihre Nachricht als Fax mit Ihrer Unterschrift versenden, wenn Sie Ihre Unterschrift hier eintragen.\n"
+"            Manche Behörden verlangen schriftliche Nachrichten mit "
+"Unterschrift von Ihnen.\n"
+"            Wir können Ihre Nachricht als Fax mit Ihrer Unterschrift "
+"versenden, wenn Sie Ihre Unterschrift hier eintragen.\n"
 "          "
 
-#: templates/froide_fax/_signature_form.html
+#: froide_fax/templates/froide_fax/_signature_form.html:20
 msgid ""
 "\n"
-"            We will only place your signature under requests and messages that you send.\n"
+"            We will only place your signature under requests and messages "
+"that you send.\n"
 "          "
 msgstr ""
 "\n"
-"            Wir werden Ihre Unterschrift ausschließlich unter Anfragen und Nachrichten setzen, die wir in Ihrem Auftrag versenden.\n"
+"            Wir werden Ihre Unterschrift ausschließlich unter Anfragen und "
+"Nachrichten setzen, die wir in Ihrem Auftrag versenden.\n"
 "          "
 
-#: templates/froide_fax/_signature_form.html
+#: froide_fax/templates/froide_fax/_signature_form.html:25
 msgid ""
 "\n"
-"            Please write your signature in the box below by using your mouse on Desktop or your finger on touch screens.\n"
+"            Please write your signature in the box below by using your mouse "
+"on Desktop or your finger on touch screens.\n"
 "          "
 msgstr ""
 "\n"
-"            Bitte schreiben Sie Ihre Unterschrift in den Kasten, entweder mit Ihrem gedrückten Mauszeiger auf Desktopgeräten oder mit Ihrem Finger auf Mobilgeräten.\n"
+"            Bitte schreiben Sie Ihre Unterschrift in den Kasten, entweder "
+"mit Ihrem gedrückten Mauszeiger auf Desktopgeräten oder mit Ihrem Finger auf "
+"Mobilgeräten.\n"
 "          "
 
-#: templates/froide_fax/_signature_form.html
+#: froide_fax/templates/froide_fax/_signature_form.html:45
 msgid "Save signature"
 msgstr "Unterschrift speichern"
 
-#: templates/froide_fax/_signature_form.html
+#: froide_fax/templates/froide_fax/_signature_form.html:52
 msgid "Delete signature"
 msgstr "Unterschrift löschen"
 
-#: templates/froide_fax/message_letter.html
+#: froide_fax/templates/froide_fax/message_letter.html:6
 msgid "Via"
 msgstr "Via"
 
-#: templates/froide_fax/message_letter.html
+#: froide_fax/templates/froide_fax/message_letter.html:7
 msgid "Fax and email"
 msgstr "Fax und E-Mail"
 
-#: templates/froide_fax/message_letter.html
+#: froide_fax/templates/froide_fax/message_letter.html:11
 msgid "Kind Regards,"
 msgstr "Mit freundlichen Grüßen"
 
-#: templates/froide_fax/widgets/signature.html
+#: froide_fax/templates/froide_fax/widgets/signature.html:11
 msgid "Write your signature in the box above."
 msgstr "Bitte schreiben Sie Ihre Unterschrift in den obigen Kasten."
 
-#: templates/froide_fax/widgets/signature.html
+#: froide_fax/templates/froide_fax/widgets/signature.html:14
 msgid "Undo"
 msgstr "Rückgängig"
 
-#: templates/froide_fax/widgets/signature.html
+#: froide_fax/templates/froide_fax/widgets/signature.html:15
 msgid "Clear"
 msgstr "Leeren"
 
-#: views.py
+#: froide_fax/views.py:217
 msgid "Signature has been saved."
 msgstr "Unterschrift wurde gespeichert."
 
-#: views.py
+#: froide_fax/views.py:221
 msgid "Signature has been removed."
 msgstr "Unterschrift wurde gelöscht."
