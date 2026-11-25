@@ -10,6 +10,7 @@ from froide.foirequest.models import DeliveryStatus, FoiAttachment, FoiMessage
 from froide.foirequest.models.message import MessageKind
 from froide.helper.widgets import BootstrapCheckboxInput
 from froide.problem.models import ProblemReport
+from requests.exceptions import HTTPError
 
 from .backends import FaxSendResult, get_fax_backend
 from .forms import SignatureField, save_signature_for_user
@@ -137,7 +138,7 @@ def create_fax_attachment(fax_message):
 
 
 def send_fax_message(fax_message):
-    if not fax_message.kind == MessageKind.FAX:
+    if fax_message.kind != MessageKind.FAX:
         return
 
     create_fax_attachment(fax_message)
@@ -155,6 +156,8 @@ def send_fax_telnyx(
     quality="high",
 ):
     """this sends a single message through the telnyx fax gateway
+    returns the requests.Response; TelnyxFaxBackend.send() and send_test_fax()
+    read the fax id and status code from it.
     results / error to be handled by calling instance"""
     data = {
         "to": to,
@@ -187,10 +190,10 @@ def send_fax_telnyx(
 
     try:
         response.raise_for_status()
-    except Exception:
-        error_data = response.json()
-        logger.error("Fax sending failed %s", error_data)
-        raise FaxFailedException(response.text)
+    except HTTPError as e:
+        # response.text, not response.json(): an error body need not be JSON.
+        logger.error("Fax sending failed: %s", response.text)
+        raise FaxFailedException(response.text) from e
     return response
 
 
@@ -284,12 +287,12 @@ class FaxMessageHandler(MessageHandler):
 
         media_url = get_media_url(att)
 
-        ds, created = DeliveryStatus.objects.update_or_create(
+        ds, _created = DeliveryStatus.objects.update_or_create(
             message=fax_message,
-            defaults=dict(
-                status=DeliveryStatus.Delivery.STATUS_SENDING,
-                last_update=timezone.now(),
-            ),
+            defaults={
+                "status": DeliveryStatus.Delivery.STATUS_SENDING,
+                "last_update": timezone.now(),
+            },
         )
         try:
             result = send_fax(fax_number, media_url)

@@ -205,7 +205,7 @@ class UpdateSignatureView(LoginRequiredMixin, FormView):
     template_name = "froide_fax/form.html"
 
     def get_form_kwargs(self):
-        kwargs = super(UpdateSignatureView, self).get_form_kwargs()
+        kwargs = super().get_form_kwargs()
         kwargs["user"] = self.request.user
         return kwargs
 
@@ -220,7 +220,7 @@ class UpdateSignatureView(LoginRequiredMixin, FormView):
             messages.add_message(
                 self.request, messages.SUCCESS, _("Signature has been removed.")
             )
-        return super(UpdateSignatureView, self).form_valid(form)
+        return super().form_valid(form)
 
     def get_success_url(self):
         return get_redirect_url(self.request)
@@ -282,6 +282,6 @@ def pdf_report(request, message_id):
         pdf_generator.get_pdf_bytes(), content_type="application/pdf"
     )
     response["Content-Disposition"] = (
-        "attachment; " 'filename="fax-report-%s.pdf"' % message.pk
+        'attachment; filename="fax-report-%s.pdf"' % message.pk
     )
     return response
